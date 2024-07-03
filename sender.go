@@ -201,6 +201,7 @@ func (sender *Sender) DiscoverEndpoint(target URL) (URL, error) {
 
 func scanForRelLink(node *html.Node) (URL, error) {
 	hasRelVal := false
+	hasHrefVal := false
 	href := ""
 	for _, a := range node.Attr {
 		// @todo: what if for some reason there are more than one rel="" in the same node?
@@ -213,10 +214,11 @@ func scanForRelLink(node *html.Node) (URL, error) {
 				}
 			}
 		} else if a.Key == "href" {
+			hasHrefVal = true
 			href = a.Val
 		}
 	}
-	if hasRelVal {
+	if hasRelVal && hasHrefVal {
 		return url.Parse(href)
 	}
 	return nil, ErrNoRelWebmention

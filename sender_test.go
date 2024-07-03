@@ -108,11 +108,11 @@ func TestEndpointDiscovery(t *testing.T) {
 			Comment: "Single HTTP Link header with multiple values",
 			Expected: "https://webmention.rocks/test/19/webmention?head=true",
 		},
-		/*{
+		{
 			Url: "https://webmention.rocks/test/20",
 			Comment: "Link tag with no href attribute",
 			Expected: "https://webmention.rocks/test/20/webmention",
-		},*/
+		},
 		{
 			Url: "https://webmention.rocks/test/21",
 			Comment: "Webmention endpoint has query string parameters",
