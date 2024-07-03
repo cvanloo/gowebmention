@@ -53,9 +53,7 @@ func WithUserAgent(agent string) SenderOption {
 func (sender *Sender) Mention(source, target URL) error {
 	endpoint, err := sender.DiscoverEndpoint(target)
 	if err != nil {
-		if errors.Is(err, ErrNoEndpointFound) {
-		}
-		return 
+		return fmt.Errorf("mention: %w", err)
 	}
 
 	// 2. Resolve endpoint url relative to target url (only if endpoint url is relative)
@@ -93,6 +91,11 @@ func (sender *Sender) Update(source URL) error {
 	return ErrNotImplemented
 }
 
+// DiscoverEndpoint searches the target for a webmention endpoint.
+// Search stops at the first link that defines a webmention relationship.
+// If that link is not a valid url, ErrInvalidRelWebmention is returned (check with errors.Is).
+// If no link with a webmention relationship is found, ErrNoEndpointFound is returned.
+// Any other error type indicates that we made a mistake, and not the target.
 func (sender *Sender) DiscoverEndpoint(target URL) (URL, error) {
 	{ // First make a HEAD request to look for a Link-Header
 		// @todo: HttpClient needs to follow redirects (the default client follows up to 10)
@@ -122,7 +125,7 @@ func (sender *Sender) DiscoverEndpoint(target URL) (URL, error) {
 		if foundLink != "" { // Link header has highest priority [:rel-prio:]
 			endpoint, err := url.Parse(linkHeader)
 			if err != nil { // @todo: or continue on trying? [:should_we_continue_trying_or_not:]
-				return nil, fmt.Errorf("endpoint discovery: invalid url in link header: %w", foundLink)
+				return nil, fmt.Errorf("endpoint discovery: %w: in link header: %w", ErrInvalidRelWebmention, foundLink)
 			}
 			return endpoint, nil
 		}
@@ -150,21 +153,24 @@ func (sender *Sender) DiscoverEndpoint(target URL) (URL, error) {
 		var (
 			traverseHtml func(*html.Node)
 			firstLinkRel, firstARel URL
+			traverseErr error
 		)
 		traverseHtml = func(node *html.Node) {
 			if node.Type == html.ElementNode {
 				if node.Data == "link" {
 					url, err := scanForRelLink(node)
-					if err == nil {
-						firstLinkRel = url
+					if err != nil && !errors.Is(err, ErrNoRelWebmention) {
+						traverseErr = err
+						return
 					}
-					// @todo: we'll just ignore the error for now (ErrNoRelWebmention or from url.Parse) [:should_we_continue_trying_or_not:]
+					firstLinkRel = url
 				} else if node.Data == "a" {
 					url, err := scanForRelLink(node)
-					if err == nil {
-						firstARel = url
+					if err != nil && !errors.Is(err, ErrNoRelWebmention) {
+						traverseErr = err
+						return
 					}
-					// @todo: we'll just ignore the error for now (ErrNoRelWebmention or from url.Parse) [:should_we_continue_trying_or_not:]
+					firstARel = url
 				}
 			}
 			for child := node.FirstChild; child != nil; child = child.NextSibling { // parse in depth-first order
@@ -172,14 +178,18 @@ func (sender *Sender) DiscoverEndpoint(target URL) (URL, error) {
 			}
 		}
 		traverseHtml(doc)
+		if traverseErr != nil {
+			return nil, fmt.Errorf("endpoint discovery: %w: in <link> or <a> element: %w", ErrInvalidRelWebmention, traverseErr)
+		}
 		if firstLinRel != nil { // <link> has higher precedence than <a> [:rel-prio:]
 			return firstLinkRel, nil
 		}
 		if firstARel != nil {
 			return firstARel, nil
 		}
-		return nil, fmt.Errorf("endpoint discovery: %w", ErrNoEndpointFound)
 	}
+
+	return nil, ErrNoEndpointFound
 }
 
 func scanForRelLink(node *html.Node) (URL, error) {
