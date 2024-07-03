@@ -6,6 +6,8 @@ import (
 	"net/url"
 	"net/http"
 	"net/html"
+
+	"github.com/tomnomnom/linkheader"
 )
 
 type (
@@ -50,6 +52,11 @@ func WithUserAgent(agent string) SenderOption {
 
 func (sender *Sender) Mention(source, target URL) error {
 	endpoint, err := sender.DiscoverEndpoint(target)
+	if err != nil {
+		if errors.Is(err, ErrNoEndpointFound) {
+		}
+		return 
+	}
 
 	// 2. Resolve endpoint url relative to target url (only if endpoint url is relative)
 	//    Query string params must be preserved as such and not sent as (POST) body parameters
@@ -87,39 +94,51 @@ func (sender *Sender) Update(source URL) error {
 }
 
 func (sender *Sender) DiscoverEndpoint(target URL) (URL, error) {
-	// 1. Fetch target url, follow redirects, to discover Webmention endpoint:
-	//        - look for <link> or <a> element with rel=webmention
-
-	{
+	{ // First make a HEAD request to look for a Link-Header
 		// @todo: HttpClient needs to follow redirects (the default client follows up to 10)
 		//        Ensure that the client is actually configured correctly?
 		resp, err := sender.HttpClient.Head(url.String())
 		if err != nil {
 			return nil, fmt.Errorf("endpoint discovery: cannot head target: %w", err)
 		}
-		if resp.StatusCode != http.StatusOK {
+		if resp.StatusCode < 200 && resp.StatusCode >= 300 {
 			return nil, fmt.Errorf("endpoint discovery: head returned %s", resp.Status)
 		}
 
 		header := resp.Header()
 		linkHeader := header.Get("Link")
-		if linkHeader != "" {
-			// @todo: resolve relative?
-			// @todo: parse link header (needs to contain rel=webmention)
+		linkHeaderParts := strings.Split(linkHeader, ",")
+		foundLink := ""
+		if len(linkHeaderParts) == 1 {
+			foundLink = linkHeaderParts[0]
+		} else {
+			for _, l := range linkheader.Parse(linkHeader) {
+				if l.Rel == "webmention" {
+					foundLink = l.URL
+					break
+				}
+			}
+		}
+		if foundLink != "" { // Link header has highest priority [:rel-prio:]
 			endpoint, err := url.Parse(linkHeader)
-			if err != nil {
-				return nil, fmt.Errorf("endpoint discovery: invalid url in link header: %w", linkHeader)
+			if err != nil { // @todo: or continue on trying? [:should_we_continue_trying_or_not:]
+				return nil, fmt.Errorf("endpoint discovery: invalid url in link header: %w", foundLink)
 			}
 			return endpoint, nil
 		}
 	}
 
-	{
-		resp, err := sender.HttpClient.Get(url.String())
+	{ // No Link header present, so request HTML content and scan it for <link> and <a> elements
+		req, err := http.NewRequest(http.MethodGet, url.String(), nil)
+		if err != nil {
+			return nil, fmt.Errorf("endpoint discovery: cannot create request from url: %s: because: %w", url, err)
+		}
+		req.Header.Set("Accept", "text/html")
+		resp, err := sender.HttpClient.Do(req)
 		if err != nil {
 			return nil, fmt.Errorf("endpoint discovery: cannot get target: %w", err)
 		}
-		if resp.StatusCode != http.StatusOK {
+		if resp.StatusCode < 200 && resp.StatusCode >= 300 {
 			return nil, fmt.Errorf("endpoint discovery: get returned %s", resp.Status)
 		}
 
@@ -128,37 +147,60 @@ func (sender *Sender) DiscoverEndpoint(target URL) (URL, error) {
 		if err != nil {
 			return nil, fmt.Errorf("endpoint discovery: cannot parse html: %w", err)
 		}
-		var traverseHtml func(*html.Node)
+		var (
+			traverseHtml func(*html.Node)
+			firstLinkRel, firstARel URL
+		)
 		traverseHtml = func(node *html.Node) {
 			if node.Type == html.ElementNode {
-				if node.Data == "link" { // <link> has higher precedence than <a>
-					hasRelWebMention := false
-					href := ""
-					for a := range node.Attr {
-						// @todo: will also mach something like xxxwebmentionxxx, we need to make sure we only match
-						//        the whole word webmention
-						if a.Key == "rel" && strings.Contains(a.Val, "webmention") {
-							hasRelWebMention = true
-						} else if a.Key == "href" {
-							href = a.Val
-						}
+				if node.Data == "link" {
+					url, err := scanForRelLink(node)
+					if err == nil {
+						firstLinkRel = url
 					}
-					if hasRelWebMention {
-						endpoint, err := url.Parse(linkHeader)
-						if err != nil {
-							// @todo: instead of failing, try next <link>?
-							return nil, fmt.Errorf("endpoint discovery: invalid url in link element: %w", linkHeader)
-						}
-						return endpoint, nil
-					}
+					// @todo: we'll just ignore the error for now (ErrNoRelWebmention or from url.Parse) [:should_we_continue_trying_or_not:]
 				} else if node.Data == "a" {
-					// @todo: same as with <link>
+					url, err := scanForRelLink(node)
+					if err == nil {
+						firstARel = url
+					}
+					// @todo: we'll just ignore the error for now (ErrNoRelWebmention or from url.Parse) [:should_we_continue_trying_or_not:]
 				}
 			}
 			for child := node.FirstChild; child != nil; child = child.NextSibling { // parse in depth-first order
 				traverseHtml(child)
 			}
 		}
-		parse(doc)
+		traverseHtml(doc)
+		if firstLinRel != nil { // <link> has higher precedence than <a> [:rel-prio:]
+			return firstLinkRel, nil
+		}
+		if firstARel != nil {
+			return firstARel, nil
+		}
+		return nil, fmt.Errorf("endpoint discovery: %w", ErrNoEndpointFound)
 	}
+}
+
+func scanForRelLink(node *html.Node) (URL, error) {
+	hasRelVal := false
+	href := ""
+	for a := range node.Attr {
+		// @todo: what if for some reason there are more than one rel="" in the same node?
+		if !hasRelVal && a.Key == "rel" {
+			relVals := strings.Split(a.Val, " ")
+			for relVal := range relVals {
+				if strings.ToLower(relVal) == "webmention" {
+					hasRelVal = true
+					break
+				}
+			}
+		} else if a.Key == "href" {
+			href = a.Val
+		}
+	}
+	if hasRelVal {
+		return url.Parse(href)
+	}
+	return nil, ErrNoRelWebmention
 }
