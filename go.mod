@@ -1,4 +1,4 @@
-module github.com/cvanloo/gowebmention.git
+module github.com/cvanloo/gowebmention
 
 go 1.21.6
 

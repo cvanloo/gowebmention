@@ -10,15 +10,15 @@ type (
 	ReceiverOption func(*Receiver)
 )
 
-func NewReceiver(opts ReceiverOption...) *Receiver {
+func NewReceiver(opts ...ReceiverOption) *Receiver {
 	receiver := &Receiver{
 		Schemes: []Scheme{
 			"http",
-			"https"
-		}
+			"https",
+		},
 	}
 	for _, opt := range opts {
-		opt(r)
+		opt(receiver)
 	}
 	return receiver
 }
@@ -29,7 +29,7 @@ func WithScheme(scheme Scheme) ReceiverOption {
 	}
 }
 
-func (receiver *Receiver) Receive(source, target net.URL) error {
+func (receiver *Receiver) Receive(source, target url.URL) error {
 	// Processing should be idempotent
 
 	// 1. Verify source and target urls (todo)
@@ -42,9 +42,10 @@ func (receiver *Receiver) Receive(source, target net.URL) error {
 	// update any existing data picked up from source
 	// source returns 410 gone or 200 OK but does not have a source link anymore:
 	//   - remove the existing webmention or mark it as deleted
+	return ErrNotImplemented
 }
 
-func (receiver *Receiver) Verify(url net.URL) bool {
+func (receiver *Receiver) Verify(url url.URL) bool {
 	// Sync: (Request verification)
 	// ! target url malformed
 	// ! target url cannot be found
@@ -73,4 +74,5 @@ func (receiver *Receiver) Verify(url net.URL) bool {
 	// Verification successful: 
 	// May display content from the source on the target page or other pages along any other data picked up from source
 	// Notify receiver (author of source) via Matrix/Discord bot?
+	return false
 }

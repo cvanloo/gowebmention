@@ -2,7 +2,7 @@ package main
 
 import (
 
-	webmention "github.com/cvanloo/gowebmention.git"
+	webmention "github.com/cvanloo/gowebmention"
 )
 
 func main() {
