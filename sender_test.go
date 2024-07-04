@@ -135,10 +135,7 @@ func TestEndpointDiscovery(t *testing.T) {
 	sender := webmention.NewSender()
 
 	for _, target := range targets {
-		url, err := url.Parse(target.Url)
-		if err != nil {
-			t.Fatal(err)
-		}
+		url := must(url.Parse(target.Url))
 		endpoint, err := sender.DiscoverEndpoint(url)
 		if err != nil {
 			t.Log(target.Comment)
