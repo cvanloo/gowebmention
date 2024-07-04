@@ -131,6 +131,13 @@ var targets = Targets{
 	},
 }
 
+func must[T any](t T, e error) T {
+	if e != nil {
+		panic(e)
+	}
+	return t
+}
+
 func TestEndpointDiscovery(t *testing.T) {
 	sender := webmention.NewSender()
 
@@ -147,18 +154,14 @@ func TestEndpointDiscovery(t *testing.T) {
 	}
 }
 
-func must[T any](t T, e error) T {
-	if e != nil {
-		panic(e)
-	}
-	return t
-}
-
 func TestMentioning(t *testing.T) {
 	sender := webmention.NewSender()
 
-	err := sender.Mention(must(url.Parse("http://localhost/")), must(url.Parse(targets[0].Url)))
-	if err != nil {
-		t.Errorf("mentioning failed for: %s with reason: %s", targets[0].Url, err)
+	source := must(url.Parse("http://blog.vanloo.ch/test/webmention.html"))
+	for _, target := range targets {
+		err := sender.Mention(source, must(url.Parse(target.Url)))
+		if err != nil {
+			t.Errorf("mentioning failed for: %s with reason: %s", target.Url, err)
+		}
 	}
 }

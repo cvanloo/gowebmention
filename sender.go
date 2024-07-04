@@ -20,12 +20,27 @@ type (
 		// Precondition: the source url must actually contain an exact match of the target url.
 		Mention(source, target URL) error
 
+		// Calls Mention for each of the target urls.
+		// All mentions are made from the same source.
+		// Continues on on errors with the next target.
+		// The returned error is a composite consisting of all encountered errors.
+		MentionMany(source, targets []URL) error
+
 		// Update resends any previously sent webmentions for the source url.
-		Update(source URL) error
+		// The current set of targets on the source is used to find new mentions and send them notifications accordingly.
+		// If the source url has been deleted, it is expected (of the user) to
+		// have it setup to return 410 Gone and return a tombstone
+		// representation in the body.
+		Update(source URL, targets []URL) error
+	}
+	Persister interface {
+		// PastTargets compiles a list of all the targets that the source linked to on the last update.
+		PastTargets(source URL) ([]URL, error)
 	}
 	Sender struct {
 		UserAgent  string
 		HttpClient *http.Client
+		Persist Persister
 	}
 	SenderOption func(*Sender)
 )
@@ -37,6 +52,9 @@ func NewSender(opts ...SenderOption) *Sender {
 	sender := &Sender{
 		UserAgent:  "Webmention (github.com/cvanloo/gowebmention)",
 		HttpClient: http.DefaultClient,
+		Persist: &XmlPersiter{
+			Path: ".",
+		},
 	}
 	for _, opt := range opts {
 		opt(sender)
@@ -50,6 +68,14 @@ func NewSender(opts ...SenderOption) *Sender {
 func WithUserAgent(agent string) SenderOption {
 	return func(s *Sender) {
 		s.UserAgent = agent
+	}
+}
+
+// Use custom persistent store.
+// Per default data is persisted to an XML file in the process working directory.
+func WithPersist(persist Persister) SenderOption {
+	return func(s *Sender) {
+		s.Persist = persist
 	}
 }
 
@@ -101,20 +127,30 @@ func (sender *Sender) Mention(source, target URL) error {
 	return nil
 }
 
-func (sender *Sender) Update(source URL) error {
-	// If source url updated:
-	//   - rediscover endpoint (in case it changed)
-	//   - resend any previously sent webmentions (including if the target has been removed from the page)
-	//   - SHOULD send webmentions for any new links appearing in the source
-	// Including if response to source is shown on the source as comment, that is also an update to the source url
-	//   resend any previously sent webmentions, (but probably shouldn't send to response -> loop?)
+func (sender *Sender) MentionMany(source, targets []URL) (err error) {
+	for _, target := range targets {
+		merr := sender.Mention(source, target)
+		err = errors.Join(err, merr)
+	}
+	return err
+}
 
-	// If source url deleted:
-	//   - Need to return 410 Gone for the url
-	//   - Show tombstone representation of deleted post
-	//   - resend any previously sent webmentions for the post
+func (sender *Sender) Update(source URL, currentTargets []URL) error {
+	pastTargets, err := sender.PastTargets(source)
+	if err != nil {
+		return fmt.Errorf("update: cannot get past targets for: %s: %w", source, err)
+	}
+	targets := make([]URL, 0, len(pastTargets) + len(targets))
+	for target := range pastTargets {
+		targets = append(targets, target)
+	}
+	for _, maybeNewTarget := range currentTargets {
+		if _, isOld := pastTargets[maybeNewTarget]; !isOld {
+			targets = append(targets, maybeNewTarget)
+		}
+	}
 
-	return ErrNotImplemented
+	return sender.MentionMany(targets)
 }
 
 // DiscoverEndpoint searches the target for a webmention endpoint.
@@ -268,4 +304,15 @@ func scanForRelLink(node *html.Node) (URL, error) {
 		return url.Parse(href)
 	}
 	return nil, ErrNoRelWebmention
+}
+
+func (sender *Sender) PastTargets(source URL) (pastTargets map[URL]struct{}, err error) {
+	targets, err := sender.Persist.PastTargets(source)
+	if err != nil {
+		return fmt.Errorf("past targets: %w", err)
+	}
+	for _, target := range targets {
+		pastTargets[target] = struct{}{}
+	}
+	return pastTargets, nil
 }
