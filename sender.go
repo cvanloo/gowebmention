@@ -3,6 +3,7 @@ package webmention
 import (
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -58,11 +59,10 @@ func (sender *Sender) Mention(source, target URL) error {
 	}
 	_ = endpoint
 
-	// 3. Notify receiver on its endpoint
-	//      - POST endpoint (preserve query string params, don't put them into the POST body!)
-	//      - x-www-form-urlencoded:
-	//         - source: sender's page containing link
-	//         - target: url of page being linked to
+	//resp, err := sender.HttpClient.PostForm(endpoint.String(), "x-www-form-urlencoded", url.Values{
+	//	"source": {source},
+	//	"target": {target},
+	//})
 
 	// 4. Check response
 	//      - any 2XX considered success
@@ -95,11 +95,22 @@ func (sender *Sender) Update(source URL) error {
 // If that link is not a valid url, ErrInvalidRelWebmention is returned (check with errors.Is).
 // If no link with a webmention relationship is found, ErrNoEndpointFound is returned.
 // Any other error type indicates that we made a mistake, and not the target.
-func (sender *Sender) DiscoverEndpoint(target URL) (URL, error) {
+func (sender *Sender) DiscoverEndpoint(target URL) (endpoint URL, err error) {
 	{ // First make a HEAD request to look for a Link-Header
 		// @todo: HttpClient needs to follow redirects (the default client follows up to 10)
 		//        Ensure that the client is actually configured correctly?
 		resp, err := sender.HttpClient.Head(target.String())
+		{
+			// go doc http.Do: body needs to be read to EOF and closed [:read_eof_and_close_body:]
+			bs, rerr := io.ReadAll(resp.Body)
+			defer func() {
+				var errTooMuch error
+				if len(bs) != 0 {
+					errTooMuch = fmt.Errorf("endpoint discovery: expected only tip but got whole shaft: %d bytes read from response body", len(bs))
+				}
+				err = errors.Join(err, rerr, errTooMuch)
+			}()
+		}
 		if err != nil {
 			return nil, fmt.Errorf("endpoint discovery: cannot head target: %w", err)
 		}
@@ -137,6 +148,14 @@ func (sender *Sender) DiscoverEndpoint(target URL) (URL, error) {
 		if err != nil {
 			return nil, fmt.Errorf("endpoint discovery: cannot get target: %w", err)
 		}
+		defer func() {
+			// go doc http.Do: body needs to be read to EOF and closed [:read_eof_and_close_body:]
+			// parser below will read body till EOF
+			cerr := resp.Body.Close()
+			if cerr != nil {
+				err = errors.Join(err, cerr)
+			}
+		}()
 		if resp.StatusCode < 200 && resp.StatusCode >= 300 {
 			return nil, fmt.Errorf("endpoint discovery: get returned %s", resp.Status)
 		}
