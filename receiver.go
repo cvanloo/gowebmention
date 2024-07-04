@@ -6,7 +6,7 @@ type (
 	Receiver struct {
 		Schemes []Scheme
 	}
-	Scheme string // @todo: does net/url already have something like this?
+	Scheme         string // @todo: does net/url already have something like this?
 	ReceiverOption func(*Receiver)
 )
 
@@ -35,7 +35,6 @@ func (receiver *Receiver) Receive(source, target url.URL) error {
 	// 1. Verify source and target urls (todo)
 	// 2. Queue and process request async (202 Accepted, no Location)
 	//    Return human readable body (maybe)
-
 
 	// Update existing webmentions (has received same source and target in past)
 	// verify ...
@@ -71,7 +70,7 @@ func (receiver *Receiver) Verify(url url.URL) bool {
 	// Failure on our side (receiver):
 	// return 500 Internal Server Error
 
-	// Verification successful: 
+	// Verification successful:
 	// May display content from the source on the target page or other pages along any other data picked up from source
 	// Notify receiver (author of source) via Matrix/Discord bot?
 	return false

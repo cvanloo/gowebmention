@@ -1,7 +1,6 @@
 package main
 
 import (
-
 	webmention "github.com/cvanloo/gowebmention"
 )
 

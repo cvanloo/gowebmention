@@ -4,16 +4,17 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strings"
 
-	"golang.org/x/net/html"
 	"github.com/tomnomnom/linkheader"
+	"golang.org/x/net/html"
 )
 
 type (
-	URL = *url.URL
+	URL              = *url.URL
 	WebMentionSender interface {
 		// Mention notifies the target url that it is being linked to by the source url.
 		// Precondition: the source url must actually contain an exact match of the target url.
@@ -23,7 +24,7 @@ type (
 		Update(source URL) error
 	}
 	Sender struct {
-		UserAgent string
+		UserAgent  string
 		HttpClient *http.Client
 	}
 	SenderOption func(*Sender)
@@ -34,7 +35,7 @@ var _ WebMentionSender = (*Sender)(nil)
 
 func NewSender(opts ...SenderOption) *Sender {
 	sender := &Sender{
-		UserAgent: "Webmention (github.com/cvanloo/gowebmention)",
+		UserAgent:  "Webmention (github.com/cvanloo/gowebmention)",
 		HttpClient: http.DefaultClient,
 	}
 	for _, opt := range opts {
@@ -57,20 +58,50 @@ func (sender *Sender) Mention(source, target URL) error {
 	if err != nil {
 		return fmt.Errorf("mention: %w", err)
 	}
-	_ = endpoint
 
-	//resp, err := sender.HttpClient.PostForm(endpoint.String(), "x-www-form-urlencoded", url.Values{
-	//	"source": {source},
-	//	"target": {target},
-	//})
+	log := slog.With(
+		"function", "Mention",
+		slog.Group("request_info",
+			"source", source.String(),
+			"target", target.String(),
+		),
+	)
 
-	// 4. Check response
-	//      - any 2XX considered success
-	//      - 200 OK: Request has been processed (synchronously)
-	//      - 201 Created: Request will be processed async, check Location header field for status page
-	//      - 202 Accepted: Request is will be processed async, no way to check status
+	resp, err := sender.HttpClient.PostForm(endpoint.String(), url.Values{
+		"source": {source.String()},
+		"target": {target.String()},
+	})
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(resp.Body)
+		log.Error(
+			"post request failed",
+			"status", resp.Status,
+			"body", string(body),
+		)
+		return fmt.Errorf("mention: endpoint: %s: post form returned: %s", endpoint, resp.Status)
+	}
 
+	switch resp.StatusCode {
+	case http.StatusOK:
+		log.Info("request was processed synchronously",
+			"endpoint", endpoint,
+		)
+	case http.StatusCreated:
+		log.Info("request is being processed asynchronously",
+			"endpoint", endpoint,
+			"status_page", resp.Header.Values("Location"),
+		)
+	case http.StatusAccepted:
+		log.Info("request is being processed asynchronously",
+			"endpoint", endpoint,
+			"status_page", nil,
+		)
+	}
 
+	return nil
+}
+
+func (sender *Sender) Update(source URL) error {
 	// If source url updated:
 	//   - rediscover endpoint (in case it changed)
 	//   - resend any previously sent webmentions (including if the target has been removed from the page)
@@ -83,10 +114,6 @@ func (sender *Sender) Mention(source, target URL) error {
 	//   - Show tombstone representation of deleted post
 	//   - resend any previously sent webmentions for the post
 
-	return ErrNotImplemented
-}
-
-func (sender *Sender) Update(source URL) error {
 	return ErrNotImplemented
 }
 
@@ -166,9 +193,9 @@ func (sender *Sender) DiscoverEndpoint(target URL) (endpoint URL, err error) {
 			return nil, fmt.Errorf("endpoint discovery: cannot parse html: %w", err)
 		}
 		var (
-			traverseHtml func(*html.Node) bool
+			traverseHtml            func(*html.Node) bool
 			firstLinkRel, firstARel URL
-			traverseErr error
+			traverseErr             error
 		)
 		traverseHtml = func(node *html.Node) bool {
 			if node.Type == html.ElementNode {

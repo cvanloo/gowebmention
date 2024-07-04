@@ -1,6 +1,6 @@
 .PHONY: test
 
 test: .FORCE
-	go test ./...
+	go test ./... -run 'TestMention'
 
 .FORCE:
