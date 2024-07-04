@@ -114,7 +114,7 @@ func (sender *Sender) DiscoverEndpoint(target URL) (endpoint URL, err error) {
 		if err != nil {
 			return nil, fmt.Errorf("endpoint discovery: cannot head target: %w", err)
 		}
-		if resp.StatusCode < 200 && resp.StatusCode >= 300 {
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 			return nil, fmt.Errorf("endpoint discovery: head returned %s", resp.Status)
 		}
 
@@ -156,7 +156,7 @@ func (sender *Sender) DiscoverEndpoint(target URL) (endpoint URL, err error) {
 				err = errors.Join(err, cerr)
 			}
 		}()
-		if resp.StatusCode < 200 && resp.StatusCode >= 300 {
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 			return nil, fmt.Errorf("endpoint discovery: get returned %s", resp.Status)
 		}
 
