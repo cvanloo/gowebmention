@@ -32,6 +32,8 @@ type (
 		// If the source url has been deleted, it is expected (of the user) to
 		// have it setup to return 410 Gone and return a tombstone
 		// representation in the body.
+		// Update can also be called if its the first time mentioning a post,
+		// in which case an empty or nil pastTargets should be passed.
 		Update(source URL, pastTargets, currentTargets []URL) error
 	}
 	Sender struct {

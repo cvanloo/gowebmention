@@ -1,3 +1,18 @@
+// Provides a service that listens for and processes incoming Webmentions.
+// After some preliminary (synchronous) validation, Webmention requests are
+// queued and then processed asynchronously.
+//
+// This application can be run (for example) as a daemon.
+// However, it is intended more as an example of how to use this library in
+// your own project.
+//
+// By registering listeners you can write your own logic to react to Webmentions:
+//
+//   receiver := webmention.NewReceiver(
+//      webmention.WithListener(customHandler),
+//   )
+//
+// ...where customHandler implements the webmention.Listener interface.
 package main
 
 import (
@@ -17,7 +32,9 @@ import (
 const shutdownTimeout = 20 * time.Second
 
 func main() {
-	receiver := webmention.NewReceiver()
+	receiver := webmention.NewReceiver(
+		webmention.WithListener(WebmentionLogger{}),
+	)
 
 	go receiver.ProcessMentions()
 
@@ -48,4 +65,14 @@ func main() {
 		slog.Error(fmt.Sprintf("http shutdown error: %s", err))
 	}
 	receiver.Shutdown(shutdownCtx)
+}
+
+type WebmentionLogger struct{}
+
+func (wl WebmentionLogger) Receive(mention webmention.IncomingMention, rel webmention.Relationship) {
+	slog.Info("received webmention",
+		"source", mention.Source.String(),
+		"target", mention.Target.String(),
+		"rel", rel,
+	)
 }
