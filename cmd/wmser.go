@@ -14,7 +14,7 @@ import (
 	webmention "github.com/cvanloo/gowebmention"
 )
 
-const shutdownTimeout = 20*time.Second
+const shutdownTimeout = 20 * time.Second
 
 func main() {
 	receiver := webmention.NewReceiver()

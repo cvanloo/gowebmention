@@ -15,7 +15,7 @@ type (
 		dequeue    <-chan IncomingMention
 		listeners  []Listener
 		httpClient *http.Client
-		shutdown chan struct{}
+		shutdown   chan struct{}
 	}
 	Scheme          string
 	ReceiverOption  func(*Receiver)
@@ -45,9 +45,9 @@ func NewReceiver(opts ...ReceiverOption) *Receiver {
 			"https",
 		},
 		httpClient: http.DefaultClient,
-		enqueue: queue,
-		dequeue: queue,
-		shutdown: make(chan struct{}),
+		enqueue:    queue,
+		dequeue:    queue,
+		shutdown:   make(chan struct{}),
 	}
 	for _, opt := range opts {
 		opt(receiver)
