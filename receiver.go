@@ -10,11 +10,12 @@ import (
 
 type (
 	Receiver struct {
-		Schemes    []Scheme
-		Enqueue    chan<- IncomingMention
-		Dequeue    <-chan IncomingMention
-		Listeners  []Listener
-		HttpClient *http.Client
+		schemes    []Scheme
+		enqueue    chan<- IncomingMention
+		dequeue    <-chan IncomingMention
+		listeners  []Listener
+		httpClient *http.Client
+		shutdown chan struct{}
 	}
 	Scheme          string
 	ReceiverOption  func(*Receiver)
@@ -39,12 +40,14 @@ const (
 func NewReceiver(opts ...ReceiverOption) *Receiver {
 	queue := make(chan IncomingMention, 100) // @todo: configure buffer size
 	receiver := &Receiver{
-		Schemes: []Scheme{
+		schemes: []Scheme{
 			"http",
 			"https",
 		},
-		Enqueue: queue,
-		Dequeue: queue,
+		httpClient: http.DefaultClient,
+		enqueue: queue,
+		dequeue: queue,
+		shutdown: make(chan struct{}),
 	}
 	for _, opt := range opts {
 		opt(receiver)
@@ -54,13 +57,13 @@ func NewReceiver(opts ...ReceiverOption) *Receiver {
 
 func WithScheme(scheme ...Scheme) ReceiverOption {
 	return func(r *Receiver) {
-		r.Schemes = append(r.Schemes, scheme...)
+		r.schemes = append(r.schemes, scheme...)
 	}
 }
 
 func WithListener(listener ...Listener) ReceiverOption {
 	return func(r *Receiver) {
-		r.Listeners = append(r.Listeners, listener...)
+		r.listeners = append(r.listeners, listener...)
 	}
 }
 
@@ -130,7 +133,7 @@ func (receiver *Receiver) Handle(w http.ResponseWriter, r *http.Request) error {
 	}
 
 	select {
-	case receiver.Enqueue <- IncomingMention{sourceURL, targetURL}:
+	case receiver.enqueue <- IncomingMention{sourceURL, targetURL}:
 	default:
 		return TooManyRequests()
 	}
@@ -142,27 +145,58 @@ func (receiver *Receiver) Handle(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 
-// ProcessMentions does not return.
-// Should be run on its own goroutine.
-// Will exit once the ctx has been cancelled.
-func (receiver *Receiver) ProcessMentions(ctx context.Context) {
-loop:
+// ProcessMentions does not return until stopped by calling Shutdown.
+// It is intended to run this function in its own goroutine.
+func (receiver *Receiver) ProcessMentions() {
+	// process queue until a shutdown is issued
 	for {
 		select {
-		case mention := <-receiver.Dequeue: // @todo: log any mentions, even (especially) invalid ones
-			rel, err := receiver.SourceToTargetRel(mention.Source, mention.Target)
-			if err != nil {
-				// @todo: log error
-				continue loop
+		case <-receiver.shutdown:
+			return
+		case mention, ok := <-receiver.dequeue:
+			if !ok {
+				return
 			}
-			if rel != SourceDoesNotExist && rel != SourceDoesNotLinkToTarget {
-				// Processing should be idempotent
-				for _, listener := range receiver.Listeners {
-					listener.Receive(mention, rel)
-				}
-			}
+			receiver.processMention(mention)
+		}
+	}
+}
+
+// Shutdown causes the webmention service to stop accepting any new mentions.
+// Mentions currently waiting in the request queue will still be processed,
+// until ctx expires.
+// The http server (or whatever is invoking WebmentionEndpoint) must be stopped
+// first, WebmentionEndpoint will panic otherwise.
+func (receiver *Receiver) Shutdown(ctx context.Context) {
+	// Finish processing queue until it is emptied or the shutdown context has expired.
+	// Whichever happens first.
+	close(receiver.shutdown)
+	close(receiver.enqueue)
+	for {
+		select {
 		case <-ctx.Done():
 			return
+		case mention, ok := <-receiver.dequeue:
+			if !ok {
+				return
+			}
+			receiver.processMention(mention)
+		}
+	}
+}
+
+func (receiver *Receiver) processMention(mention IncomingMention) {
+	slog.Info("processing mention", "source", mention.Source.String(), "target", mention.Target.String())
+	// @todo: log any mentions, even (especially) invalid ones
+	rel, err := receiver.SourceToTargetRel(mention.Source, mention.Target)
+	if err != nil {
+		// @todo: log error
+		return
+	}
+	if rel != SourceDoesNotExist && rel != SourceDoesNotLinkToTarget {
+		// Processing should be idempotent
+		for _, listener := range receiver.listeners {
+			listener.Receive(mention, rel)
 		}
 	}
 }
@@ -176,7 +210,7 @@ func (receiver *Receiver) TargetAccepts(target URL) bool {
 }
 
 func (receiver *Receiver) IsSchemeSupported(scheme Scheme) bool {
-	for _, other := range receiver.Schemes {
+	for _, other := range receiver.schemes {
 		schemeLower := strings.ToLower(string(scheme))
 		otherLower := strings.ToLower(string(other))
 		if schemeLower == otherLower {
@@ -187,7 +221,7 @@ func (receiver *Receiver) IsSchemeSupported(scheme Scheme) bool {
 }
 
 func (receiver *Receiver) SourceToTargetRel(source, target URL) (rel Relationship, err error) {
-	resp, err := receiver.HttpClient.Head(source.String())
+	resp, err := receiver.httpClient.Head(source.String())
 	if err != nil {
 		return SourceDoesNotExist, err
 	}

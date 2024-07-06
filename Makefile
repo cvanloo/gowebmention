@@ -2,6 +2,7 @@
 
 test: .FORCE
 	#go test ./... -run 'TestMention'
-	go build ./...
+	go test ./... -run 'TestReceive'
+	#go build ./...
 
 .FORCE:

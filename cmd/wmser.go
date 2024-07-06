@@ -14,12 +14,12 @@ import (
 	webmention "github.com/cvanloo/gowebmention"
 )
 
+const shutdownTimeout = 20*time.Second
+
 func main() {
 	receiver := webmention.NewReceiver()
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel() // @todo: actually wait for goroutine to exit
-	go receiver.ProcessMentions(ctx)
+	go receiver.ProcessMentions()
 
 	mux := &http.ServeMux{}
 	mux.HandleFunc("/webmention", receiver.WebmentionEndpoint)
@@ -33,7 +33,7 @@ func main() {
 		err := server.ListenAndServe()
 		//err := server.ListenAndServeTLS()
 		if err != nil && !errors.Is(err, http.ErrServerClosed) {
-			slog.Error(fmt.Sprintf("http server error: %w", err))
+			slog.Error(fmt.Sprintf("http server error: %s", err))
 		}
 	}()
 
@@ -42,9 +42,10 @@ func main() {
 	<-c // wait for interrupt
 	slog.Info("interrupt received, shutting down")
 
-	shutdownCtx, shutdownRelease := context.WithTimeout(context.Background(), 10*time.Second)
+	shutdownCtx, shutdownRelease := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer shutdownRelease()
 	if err := server.Shutdown(shutdownCtx); err != nil {
-		slog.Error(fmt.Sprintf("http shutdown error: %w", err))
+		slog.Error(fmt.Sprintf("http shutdown error: %s", err))
 	}
+	receiver.Shutdown(shutdownCtx)
 }
