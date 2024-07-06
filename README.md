@@ -18,7 +18,7 @@ Sending webmentions can be done through a `WebMentionSender`.
 
 ```go
 sender := webmention.NewSender()
-sender.Update(source, pastMentions, currentMentions...)
+sender.Update(source, pastMentions, currentMentions)
 // source: the url for which you want to send mentions
 // pastMentions: if you have sent mentions for the same url before, this list should include all targets mentioned the last time
 //               otherwise you can leave the list empty or nil
