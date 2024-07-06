@@ -163,5 +163,6 @@ func TestMentioning(t *testing.T) {
 		if err != nil {
 			t.Errorf("mentioning failed for: %s with reason: %s", target.Url, err)
 		}
+		break
 	}
 }

@@ -33,14 +33,9 @@ type (
 		// representation in the body.
 		Update(source URL, targets []URL) error
 	}
-	Persister interface {
-		// PastTargets compiles a list of all the targets that the source linked to on the last update.
-		PastTargets(source URL) ([]URL, error)
-	}
 	Sender struct {
 		UserAgent  string
 		HttpClient *http.Client
-		Persist Persister
 	}
 	SenderOption func(*Sender)
 )
@@ -52,9 +47,6 @@ func NewSender(opts ...SenderOption) *Sender {
 	sender := &Sender{
 		UserAgent:  "Webmention (github.com/cvanloo/gowebmention)",
 		HttpClient: http.DefaultClient,
-		Persist: &XmlPersiter{
-			Path: ".",
-		},
 	}
 	for _, opt := range opts {
 		opt(sender)
@@ -68,14 +60,6 @@ func NewSender(opts ...SenderOption) *Sender {
 func WithUserAgent(agent string) SenderOption {
 	return func(s *Sender) {
 		s.UserAgent = agent
-	}
-}
-
-// Use custom persistent store.
-// Per default data is persisted to an XML file in the process working directory.
-func WithPersist(persist Persister) SenderOption {
-	return func(s *Sender) {
-		s.Persist = persist
 	}
 }
 
@@ -136,7 +120,7 @@ func (sender *Sender) MentionMany(source, targets []URL) (err error) {
 }
 
 func (sender *Sender) Update(source URL, currentTargets []URL) error {
-	pastTargets, err := sender.PastTargets(source)
+	pastTargets, err := sender.PastTargets(source) // @todo: implement past targets
 	if err != nil {
 		return fmt.Errorf("update: cannot get past targets for: %s: %w", source, err)
 	}
@@ -304,15 +288,4 @@ func scanForRelLink(node *html.Node) (URL, error) {
 		return url.Parse(href)
 	}
 	return nil, ErrNoRelWebmention
-}
-
-func (sender *Sender) PastTargets(source URL) (pastTargets map[URL]struct{}, err error) {
-	targets, err := sender.Persist.PastTargets(source)
-	if err != nil {
-		return fmt.Errorf("past targets: %w", err)
-	}
-	for _, target := range targets {
-		pastTargets[target] = struct{}{}
-	}
-	return pastTargets, nil
 }
