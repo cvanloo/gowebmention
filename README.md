@@ -66,4 +66,55 @@ var LogMentions MentionLogger
 
 ## Run as a service
 
+[Sender](cmd/sender/) can be run as a daemon to listen for commands on a socket.
+
+Something managing a source, eg., a blogging software, can send a command through the socket, instructing the Sender to send out webmentions.
+
+A command has the following JSON structure:
+
+```json
+{
+  "mentions": [
+    {
+      "source": "<source 1 url>",
+      "past_targets": [
+        "<target 1 url>",
+        "<target 2 url>",
+        ...
+      ],
+      "current_targets": [
+        "<target 1 url>",
+        "<target 2 url>",
+        ...
+      ]
+    },
+    {
+      "source": "<source 2 url>",
+      "past_targets": [...],
+      "current_targets": [...],
+    },
+    ...
+  ]
+}
+```
+
+For each of the sources, the past and current targets will be mentioned.
+
+The daemon responds for each mention with whether it was successful or not:
+
+```json
+{
+  "statuses": [
+    {
+      "source": "<source 1 url>",
+      "error": ""
+    }
+    ...
+  ],
+  "error": ""
+}
+```
+
+An empty error string indicates success.
+
 TODO: Finish implementing logic, then write this section.
