@@ -27,22 +27,16 @@ type (
 		MentionMany(source URL, targets []URL) error
 
 		// Update resends any previously sent webmentions for the source url.
-		// The current set of targets on the source is used to find new mentions and send them notifications accordingly.
+		// pastTargets are all targets mentioned by the source in its last version.
+		// currentTargets are all targets mentioned by the source in its current version.
 		// If the source url has been deleted, it is expected (of the user) to
 		// have it setup to return 410 Gone and return a tombstone
 		// representation in the body.
-		Update(source URL, targets []URL) error
-	}
-	Storage interface {
-		// PastTargets compiles a list of all targets that where mentioned by
-		// source in its last version.
-		// The list must be free of duplicates.
-		PastTargets(source URL) (pastTargets []URL, err error)
+		Update(source URL, pastTargets, currentTargets []URL) error
 	}
 	Sender struct {
 		UserAgent  string
 		HttpClient *http.Client
-		Store Storage
 	}
 	SenderOption func(*Sender)
 )
@@ -54,7 +48,6 @@ func NewSender(opts ...SenderOption) *Sender {
 	sender := &Sender{
 		UserAgent:  "Webmention (github.com/cvanloo/gowebmention)",
 		HttpClient: http.DefaultClient,
-		Store: nil,
 	}
 	for _, opt := range opts {
 		opt(sender)
@@ -68,13 +61,6 @@ func NewSender(opts ...SenderOption) *Sender {
 func WithUserAgent(agent string) SenderOption {
 	return func(s *Sender) {
 		s.UserAgent = agent
-	}
-}
-
-// Storage provides an interface to retrieve information about past mentions.
-func WithStorage(store Storage) SenderOption {
-	return func(s *Sender) {
-		s.Store = store
 	}
 }
 
@@ -135,11 +121,7 @@ func (sender *Sender) MentionMany(source URL, targets []URL) (err error) {
 	return err
 }
 
-func (sender *Sender) Update(source URL, currentTargets []URL) error {
-	pastTargets, err := sender.Store.PastTargets(source)
-	if err != nil {
-		return fmt.Errorf("update: cannot get past targets for: %s: %w", source, err)
-	}
+func (sender *Sender) Update(source URL, pastTargets, currentTargets []URL) error {
 	pastTargetsSet := map[URL]struct{}{}
 	for _, target := range pastTargets {
 		pastTargetsSet[target] = struct{}{}
