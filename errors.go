@@ -1,8 +1,8 @@
 package webmention
 
 import (
-	"fmt"
 	"errors"
+	"fmt"
 	"net/http"
 )
 

@@ -1,15 +1,15 @@
 package main
 
 import (
-	"fmt"
-	"errors"
-	"net/http"
 	"context"
+	"errors"
+	"fmt"
 	"log/slog"
-	"time"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	webmention "github.com/cvanloo/gowebmention"
 )
@@ -18,15 +18,14 @@ func main() {
 	receiver := webmention.NewReceiver()
 
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	defer cancel() // @todo: actually wait for goroutine to exit
 	go receiver.ProcessMentions(ctx)
-
 
 	mux := &http.ServeMux{}
 	mux.HandleFunc("/webmention", receiver.WebmentionEndpoint)
 
 	server := http.Server{
-		Addr: ":8080",
+		Addr:    ":8080",
 		Handler: mux,
 	}
 

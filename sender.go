@@ -127,7 +127,7 @@ func (sender *Sender) Update(source URL, pastTargets, currentTargets []URL) erro
 		pastTargetsSet[target] = struct{}{}
 	}
 
-	targets := make([]URL, 0, len(pastTargets) + len(currentTargets))
+	targets := make([]URL, 0, len(pastTargets)+len(currentTargets))
 	for _, target := range pastTargets {
 		targets = append(targets, target)
 	}

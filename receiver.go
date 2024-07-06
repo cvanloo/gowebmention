@@ -2,22 +2,22 @@ package webmention
 
 import (
 	"context"
-	"strings"
 	"log/slog"
-	"net/url"
 	"net/http"
+	"net/url"
+	"strings"
 )
 
 type (
 	Receiver struct {
-		Schemes []Scheme
-		Enqueue chan<- IncomingMention
-		Dequeue <-chan IncomingMention
-		Listeners []Listener
+		Schemes    []Scheme
+		Enqueue    chan<- IncomingMention
+		Dequeue    <-chan IncomingMention
+		Listeners  []Listener
 		HttpClient *http.Client
 	}
-	Scheme         string
-	ReceiverOption func(*Receiver)
+	Scheme          string
+	ReceiverOption  func(*Receiver)
 	IncomingMention struct {
 		Source, Target URL
 	}
@@ -28,12 +28,12 @@ type (
 )
 
 const (
-	SourceLinksToTarget Relationship = "source links to target"
-	SourceUpdated       Relationship = "source got updated, still links to target"
-	SourceRemovedTarget Relationship = "source no longer links to target"
-	SourceGotDeleted    Relationship = "source itself got deleted"
+	SourceLinksToTarget       Relationship = "source links to target"
+	SourceUpdated             Relationship = "source got updated, still links to target"
+	SourceRemovedTarget       Relationship = "source no longer links to target"
+	SourceGotDeleted          Relationship = "source itself got deleted"
 	SourceDoesNotLinkToTarget Relationship = "source does not link to target"
-	SourceDoesNotExist  Relationship = "source did never exist"
+	SourceDoesNotExist        Relationship = "source did never exist"
 )
 
 func NewReceiver(opts ...ReceiverOption) *Receiver {
@@ -149,7 +149,7 @@ func (receiver *Receiver) ProcessMentions(ctx context.Context) {
 loop:
 	for {
 		select {
-		case mention := <- receiver.Dequeue: // @todo: log any mentions, even (especially) invalid ones
+		case mention := <-receiver.Dequeue: // @todo: log any mentions, even (especially) invalid ones
 			rel, err := receiver.SourceToTargetRel(mention.Source, mention.Target)
 			if err != nil {
 				// @todo: log error
