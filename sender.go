@@ -152,20 +152,18 @@ func (sender *Sender) DiscoverEndpoint(target URL) (endpoint URL, err error) {
 		// @todo: HttpClient needs to follow redirects (the default client follows up to 10)
 		//        Ensure that the client is actually configured correctly?
 		resp, err := sender.HttpClient.Head(target.String())
-		{
-			// go doc http.Do: body needs to be read to EOF and closed [:read_eof_and_close_body:]
-			bs, rerr := io.ReadAll(resp.Body)
-			defer func() {
-				var errTooMuch error
-				if len(bs) != 0 {
-					errTooMuch = fmt.Errorf("endpoint discovery: expected only tip but got whole shaft: %d bytes read from response body", len(bs))
-				}
-				err = errors.Join(err, rerr, errTooMuch)
-			}()
-		}
 		if err != nil {
 			return nil, fmt.Errorf("endpoint discovery: cannot head target: %w", err)
 		}
+		defer func() {
+			// go doc http.Do: body needs to be read to EOF and closed [:read_eof_and_close_body:]
+			bs, rerr := io.ReadAll(resp.Body)
+			var errTooMuch error
+			if len(bs) != 0 {
+				errTooMuch = fmt.Errorf("endpoint discovery: expected only tip but got whole shaft: %d bytes read from response body", len(bs))
+			}
+			err = errors.Join(err, rerr, errTooMuch)
+		}()
 		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 			return nil, fmt.Errorf("endpoint discovery: head returned %s", resp.Status)
 		}
