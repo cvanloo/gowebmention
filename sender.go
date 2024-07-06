@@ -24,7 +24,7 @@ type (
 		// All mentions are made from the same source.
 		// Continues on on errors with the next target.
 		// The returned error is a composite consisting of all encountered errors.
-		MentionMany(source, targets []URL) error
+		MentionMany(source URL, targets []URL) error
 
 		// Update resends any previously sent webmentions for the source url.
 		// The current set of targets on the source is used to find new mentions and send them notifications accordingly.
@@ -33,9 +33,16 @@ type (
 		// representation in the body.
 		Update(source URL, targets []URL) error
 	}
+	Storage interface {
+		// PastTargets compiles a list of all targets that where mentioned by
+		// source in its last version.
+		// The list must be free of duplicates.
+		PastTargets(source URL) (pastTargets []URL, err error)
+	}
 	Sender struct {
 		UserAgent  string
 		HttpClient *http.Client
+		Store Storage
 	}
 	SenderOption func(*Sender)
 )
@@ -47,6 +54,7 @@ func NewSender(opts ...SenderOption) *Sender {
 	sender := &Sender{
 		UserAgent:  "Webmention (github.com/cvanloo/gowebmention)",
 		HttpClient: http.DefaultClient,
+		Store: nil,
 	}
 	for _, opt := range opts {
 		opt(sender)
@@ -60,6 +68,13 @@ func NewSender(opts ...SenderOption) *Sender {
 func WithUserAgent(agent string) SenderOption {
 	return func(s *Sender) {
 		s.UserAgent = agent
+	}
+}
+
+// Storage provides an interface to retrieve information about past mentions.
+func WithStorage(store Storage) SenderOption {
+	return func(s *Sender) {
+		s.Store = store
 	}
 }
 
@@ -104,14 +119,15 @@ func (sender *Sender) Mention(source, target URL) error {
 	case http.StatusAccepted:
 		log.Info("request is being processed asynchronously",
 			"endpoint", endpoint,
-			"status_page", nil,
 		)
+	default:
+		log.Info("non-standard success response code", "endpoint", endpoint)
 	}
 
 	return nil
 }
 
-func (sender *Sender) MentionMany(source, targets []URL) (err error) {
+func (sender *Sender) MentionMany(source URL, targets []URL) (err error) {
 	for _, target := range targets {
 		merr := sender.Mention(source, target)
 		err = errors.Join(err, merr)
@@ -120,21 +136,26 @@ func (sender *Sender) MentionMany(source, targets []URL) (err error) {
 }
 
 func (sender *Sender) Update(source URL, currentTargets []URL) error {
-	pastTargets, err := sender.PastTargets(source) // @todo: implement past targets
+	pastTargets, err := sender.Store.PastTargets(source)
 	if err != nil {
 		return fmt.Errorf("update: cannot get past targets for: %s: %w", source, err)
 	}
-	targets := make([]URL, 0, len(pastTargets) + len(targets))
-	for target := range pastTargets {
+	pastTargetsSet := map[URL]struct{}{}
+	for _, target := range pastTargets {
+		pastTargetsSet[target] = struct{}{}
+	}
+
+	targets := make([]URL, 0, len(pastTargets) + len(currentTargets))
+	for _, target := range pastTargets {
 		targets = append(targets, target)
 	}
 	for _, maybeNewTarget := range currentTargets {
-		if _, isOld := pastTargets[maybeNewTarget]; !isOld {
+		if _, isOld := pastTargetsSet[maybeNewTarget]; !isOld {
 			targets = append(targets, maybeNewTarget)
 		}
 	}
 
-	return sender.MentionMany(targets)
+	return sender.MentionMany(source, targets)
 }
 
 // DiscoverEndpoint searches the target for a webmention endpoint.
