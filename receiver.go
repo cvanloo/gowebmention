@@ -1,10 +1,10 @@
 package webmention
 
 import (
+	"context"
 	"strings"
 	"log/slog"
 	"net/url"
-	"errors"
 	"net/http"
 )
 
@@ -12,6 +12,7 @@ type (
 	Receiver struct {
 		Schemes []Scheme
 		Enqueue chan<- IncomingMention
+		Dequeue <-chan IncomingMention
 		Listeners []Listener
 		HttpClient *http.Client
 	}
@@ -36,11 +37,14 @@ const (
 )
 
 func NewReceiver(opts ...ReceiverOption) *Receiver {
+	queue := make(chan IncomingMention, 100) // @todo: configure buffer size
 	receiver := &Receiver{
 		Schemes: []Scheme{
 			"http",
 			"https",
 		},
+		Enqueue: queue,
+		Dequeue: queue,
 	}
 	for _, opt := range opts {
 		opt(receiver)
@@ -91,15 +95,22 @@ func (receiver *Receiver) Handle(w http.ResponseWriter, r *http.Request) error {
 		return BadRequest("missing form value: target")
 	}
 
-	if source == target {
+	if len(source) != 1 {
+		return BadRequest("malformed source argument")
+	}
+	if len(target) != 1 {
+		return BadRequest("malformed target argument")
+	}
+
+	if source[0] == target[0] {
 		return BadRequest("target must be different from source")
 	}
 
-	sourceURL, err := url.Parse(source)
+	sourceURL, err := url.Parse(source[0])
 	if err != nil {
 		return BadRequest("source url is malformed")
 	}
-	targetURL, err := url.Parse(target)
+	targetURL, err := url.Parse(target[0])
 	if err != nil {
 		return BadRequest("target url is malformed")
 	}
@@ -118,10 +129,14 @@ func (receiver *Receiver) Handle(w http.ResponseWriter, r *http.Request) error {
 		return BadRequest("target does not accept webmentions")
 	}
 
-	receiver.Enqueue <- IncomingMention{source, target}
+	select {
+	case receiver.Enqueue <- IncomingMention{sourceURL, targetURL}:
+	default:
+		return TooManyRequests()
+	}
 
 	w.WriteHeader(http.StatusAccepted)
-	if _, err := w.Write("Thank you! Your Mention has been queued for processing.") {
+	if _, err := w.Write([]byte("Thank you! Your Mention has been queued for processing.")); err != nil {
 		return err
 	}
 	return nil
@@ -130,17 +145,17 @@ func (receiver *Receiver) Handle(w http.ResponseWriter, r *http.Request) error {
 // ProcessMentions does not return.
 // Should be run on its own goroutine.
 // Will exit once the ctx has been cancelled.
-func (receiver *Receiver) ProcessMentions(ctx context.Context, dequeue <-chan IncomingMention) {
+func (receiver *Receiver) ProcessMentions(ctx context.Context) {
 loop:
 	for {
 		select {
-		case mention <- dequeue: // @todo: log any mentions, even (especially) invalid ones
-			exists, err := receiver.SourceToTargetRel(mention.Source)
+		case mention := <- receiver.Dequeue: // @todo: log any mentions, even (especially) invalid ones
+			rel, err := receiver.SourceToTargetRel(mention.Source, mention.Target)
 			if err != nil {
 				// @todo: log error
 				continue loop
 			}
-			if exists != SourceDoesNotExist && exists != SourceDoesNotLinkToTarget {
+			if rel != SourceDoesNotExist && rel != SourceDoesNotLinkToTarget {
 				// Processing should be idempotent
 				for _, listener := range receiver.Listeners {
 					listener.Receive(mention, rel)
@@ -162,8 +177,8 @@ func (receiver *Receiver) TargetAccepts(target URL) bool {
 
 func (receiver *Receiver) IsSchemeSupported(scheme Scheme) bool {
 	for _, other := range receiver.Schemes {
-		schemeLower := strings.ToLower(scheme)
-		otherLower := strings.ToLower(s)
+		schemeLower := strings.ToLower(string(scheme))
+		otherLower := strings.ToLower(string(other))
 		if schemeLower == otherLower {
 			return true
 		}
@@ -176,8 +191,8 @@ func (receiver *Receiver) SourceToTargetRel(source, target URL) (rel Relationshi
 	if err != nil {
 		return SourceDoesNotExist, err
 	}
-	if res.StatusCode == 410 {
-		return SourceGotDeleted
+	if resp.StatusCode == 410 {
+		return SourceGotDeleted, nil
 	}
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 		// Fetch source to verify that it really links to the target (must have an exact match)
@@ -189,18 +204,18 @@ func (receiver *Receiver) SourceToTargetRel(source, target URL) (rel Relationshi
 		//       - 410 Gone: source was deleted
 
 		// source used to link to target, still does
-		return SourceUpdated
+		return SourceUpdated, nil
 
 		// source used to link to target, doesn't anymore
-		return SourceRemovedTarget
+		return SourceRemovedTarget, nil
 
 		// source didn't link to target, does now
-		return SourceLinksToTarget
+		return SourceLinksToTarget, nil
 
 		// source didn't link to target, still doesn't
-		return SourceDoesNotLinkToTarget
+		return SourceDoesNotLinkToTarget, nil
 	}
 
 	// @todo: 404 or other 4XX but we know it linked to target in the past?
-	return SourceDoesNotExist
+	return SourceDoesNotExist, nil
 }

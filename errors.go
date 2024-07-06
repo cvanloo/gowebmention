@@ -1,6 +1,7 @@
 package webmention
 
 import (
+	"fmt"
 	"errors"
 	"net/http"
 )
@@ -22,6 +23,8 @@ type (
 	ErrBadRequest struct {
 		Message string
 	}
+
+	ErrTooManyRequests struct{}
 )
 
 func MethodNotAllowed() error {
@@ -47,5 +50,18 @@ func (e ErrBadRequest) Error() string {
 
 func (e ErrBadRequest) RespondError(w http.ResponseWriter, r *http.Request) bool {
 	http.Error(w, e.Error(), http.StatusBadRequest)
+	return true
+}
+
+func TooManyRequests() error {
+	return ErrTooManyRequests{}
+}
+
+func (e ErrTooManyRequests) Error() string {
+	return "too many requests"
+}
+
+func (e ErrTooManyRequests) RespondError(w http.ResponseWriter, r *http.Request) bool {
+	http.Error(w, e.Error(), http.StatusTooManyRequests)
 	return true
 }
