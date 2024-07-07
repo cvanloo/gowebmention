@@ -13,7 +13,7 @@ import (
 	"os"
 	"encoding/json"
 	"net/url"
-	"io"
+	"bufio"
 	"net"
 	"errors"
 	"fmt"
@@ -57,7 +57,7 @@ func main() {
 				}
 				return
 			}
-			go handle(conn)
+			go handle(conn) // @todo: max number of open connections?
 		}
 	}()
 
@@ -107,69 +107,53 @@ func (u *URL) UnmarshalJSON(bs []byte) error {
 	return err
 }
 
-type (
-	ConnError struct{
-		error
-	}
-	UserError struct{
-		error
-	}
-)
+type MessageError error
 
 func handle(conn net.Conn) {
 	//conn.SetDeadline(time.Now().Add(20*time.Second)) // @todo: idle timeout?
 	defer func() {
 		err := conn.Close()
 		if err != nil {
-			slog.Error(err.Error(), "remote", conn.RemoteAddr())
+			slog.Error("closing connection", "connection_error", err.Error(), "remote", conn.RemoteAddr())
 		}
 	}()
 
-	err := handleRequest(conn)
-	if err == nil {
-		return
-	}
+	scanner := bufio.NewScanner(conn)
+	for scanner.Scan() {
+		statuses, err := handleRequest(scanner.Bytes())
 
-	var connErr ConnError
-	if errors.As(err, &connErr) {
-		slog.Error(connErr.Error())
-		return
-	}
+		if err != nil {
+			if errors.Is(err, net.ErrClosed) {
+				return // stop handler for this (closed) socket
+			}
 
-	var userErr UserError
-	if errors.As(err, &userErr) {
-		slog.Error(userErr.Error())
-		statuses := MentionsResponse{
-			Error: userErr.Error(),
+			var msgErr MessageError
+			if errors.As(err, &msgErr) {
+				statuses.Error = msgErr.Error()
+			}
 		}
+
 		resp, err := json.Marshal(statuses)
 		if err != nil {
-			slog.Error(err.Error())
-			return
+			slog.Error("cannot marshal statuses response", "marshal_error", err.Error(), "statuses", statuses)
+			return // close connection, stop handler
 		}
 		if _, err := conn.Write(resp); err != nil {
-			slog.Error(err.Error())
-			return
+			return // connection was probably closed, stop handler
 		}
-		return
 	}
 }
 
-func handleRequest(conn net.Conn) error {
-	// @todo: instead of readall read till newline
-	// so the connection can be kept open to receive more commands
-	// - also add idle timeout, close connection if no commands were received
-	// in a certain time
-	// - and add connection limit?
-	bs, err := io.ReadAll(conn)
-	if err != nil {
-		return ConnError{err}
+func handleRequest(message []byte) (resp MentionsResponse, err error) {
+	if len(message) == 0 {
+		return resp, MessageError(fmt.Errorf("boredom: you didn't give me anything to do"))
 	}
-
 	var mentions MentionsMessage
-	err = json.Unmarshal(bs, &mentions)
-	if err != nil {
-		return UserError{err}
+	if err := json.Unmarshal(message, &mentions); err != nil {
+		return resp, MessageError(fmt.Errorf("invalid message: %w", err))
+	}
+	if len(mentions.Mentions) == 0 {
+		return resp, MessageError(fmt.Errorf("boredom: you didn't give me anything to do"))
 	}
 
 	var statuses MentionsResponse
@@ -195,14 +179,5 @@ func handleRequest(conn net.Conn) error {
 		statuses.Statuses = append(statuses.Statuses, status)
 	}
 
-	resp, err := json.Marshal(statuses)
-	if err != nil {
-		return UserError{err}
-	}
-	_, err = conn.Write(resp)
-	if err != nil {
-		return ConnError{err}
-	}
-
-	return nil
+	return statuses, nil
 }
