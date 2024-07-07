@@ -17,6 +17,8 @@ import (
 	"net"
 	"errors"
 	"fmt"
+	"os/signal"
+	"syscall"
 
 	webmention "github.com/cvanloo/gowebmention"
 )
@@ -44,16 +46,29 @@ func main() {
 		os.Exit(1)
 	}
 
-	for {
-		conn, err := listener.Accept()
-		if err != nil {
-			slog.Error(err.Error())
-			os.Exit(1)
+	go func() {
+		for {
+			conn, err := listener.Accept()
+			if err != nil {
+				if errors.Is(err, net.ErrClosed) {
+					slog.Info("listener closed: stopped accepting connections")
+				} else {
+					slog.Error(err.Error())
+				}
+				return
+			}
+			go handle(conn)
 		}
-		go handle(conn)
-	}
+	}()
 
-	// @todo: handle shutdown
+	c := make(chan os.Signal, 1)
+	signal.Notify(c, syscall.SIGINT, syscall.SIGTERM, syscall.SIGKILL)
+	<-c // wait for interrupt
+	slog.Info("interrupt received: shutting down")
+
+	if err := listener.Close(); err != nil {
+		slog.Error(err.Error())
+	}
 }
 
 type (
