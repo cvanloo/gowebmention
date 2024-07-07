@@ -1,53 +1,73 @@
 package webmention
 
 import (
+	"golang.org/x/net/html"
+	"strings"
 	"context"
 	"log/slog"
 	"net/http"
 	"net/url"
-	"strings"
+	"fmt"
+	"io"
 )
 
 type (
 	Receiver struct {
-		schemes    []Scheme
 		enqueue    chan<- IncomingMention
 		dequeue    <-chan IncomingMention
 		listeners  []Listener
 		httpClient *http.Client
 		shutdown   chan struct{}
+		targetExists TargetExistsFunc
+		targetAccepts TargetAcceptsFunc
+		mediaHandler map[string]MediaHandler
 	}
-	Scheme          string
+
+	// A MediaHandler searches sourceData for the target link.
+	// Only if an exact match is found a status of StatusLink and a nil error must be returned.
+	// If no (exact) match is found, a status of StatusNoLink and a nil error must be returned.
+	// If error is non-nil, it is treated as an internal error and the value of status is ignored.
+	// Generally, on error, no listeners will be invoked.
+	MediaHandler func(sourceData io.Reader, target URL) (Status, error)
 	ReceiverOption  func(*Receiver)
 	IncomingMention struct {
 		Source, Target URL
 	}
+	TargetExistsFunc func(target URL) bool
+	TargetAcceptsFunc func(source, target URL) bool
 	Listener interface {
-		Receive(mention IncomingMention, rel Relationship)
+		Receive(mention IncomingMention, status Status)
 	}
-	Relationship string
+	Status string // @todo: not good that user defined handlers should only return two out of the three defined values
 )
 
 const (
-	SourceLinksToTarget       Relationship = "source links to target"
-	SourceUpdated             Relationship = "source got updated, still links to target"
-	SourceRemovedTarget       Relationship = "source no longer links to target"
-	SourceGotDeleted          Relationship = "source itself got deleted"
-	SourceDoesNotLinkToTarget Relationship = "source does not link to target"
-	SourceDoesNotExist        Relationship = "source did never exist"
+	defaultRequestQueueSize = 100
+)
+
+const (
+	StatusLink Status = "source links to target"
+	StatusNoLink = "source does not link to target"
+	StatusDeleted = "source itself got deleted"
 )
 
 func NewReceiver(opts ...ReceiverOption) *Receiver {
-	queue := make(chan IncomingMention, 100) // @todo: configure buffer size
+	queue := make(chan IncomingMention, defaultRequestQueueSize)
 	receiver := &Receiver{
-		schemes: []Scheme{
-			"http",
-			"https",
-		},
 		httpClient: http.DefaultClient,
 		enqueue:    queue,
 		dequeue:    queue,
 		shutdown:   make(chan struct{}),
+		targetExists: func(URL) bool {
+			return false
+		},
+		targetAccepts: func(URL, URL) bool {
+			return false
+		},
+	}
+	receiver.mediaHandler = map[string]MediaHandler{
+		"text/plain": receiver.PlainHandler,
+		"text/html": receiver.HtmlHandler,
 	}
 	for _, opt := range opts {
 		opt(receiver)
@@ -55,15 +75,45 @@ func NewReceiver(opts ...ReceiverOption) *Receiver {
 	return receiver
 }
 
-func WithScheme(scheme ...Scheme) ReceiverOption {
-	return func(r *Receiver) {
-		r.schemes = append(r.schemes, scheme...)
-	}
-}
-
 func WithListener(listener ...Listener) ReceiverOption {
 	return func(r *Receiver) {
 		r.listeners = append(r.listeners, listener...)
+	}
+}
+
+func WithExistsFunc(exists TargetExistsFunc) ReceiverOption {
+	return func(r *Receiver) {
+		r.targetExists = exists
+	}
+}
+
+func WithAcceptsFunc(accepts TargetAcceptsFunc) ReceiverOption {
+	return func(r *Receiver) {
+		r.targetAccepts = accepts
+	}
+}
+
+// Register a handler for a certain media type.
+// If multiple handlers for the same type are registered, only the last handler will be considered.
+// The default handlers are:
+//   - text/plain: PlainHandler
+//   - text/html:  HtmlHandler
+// To remove any of the default handlers, pass a nil handler.
+func WithMediaHandler(mime string, handler MediaHandler) ReceiverOption {
+	return func(r *Receiver) {
+		if handler == nil {
+			delete(r.mediaHandler, mime)
+		} else {
+			r.mediaHandler[mime] = handler
+		}
+	}
+}
+
+func WithQueueSize(size int) ReceiverOption {
+	return func(r *Receiver) {
+		queue := make(chan IncomingMention, size)
+		r.enqueue = queue
+		r.dequeue = queue
 	}
 }
 
@@ -118,17 +168,17 @@ func (receiver *Receiver) Handle(w http.ResponseWriter, r *http.Request) error {
 		return BadRequest("target url is malformed")
 	}
 
-	if !receiver.IsSchemeSupported(Scheme(sourceURL.Scheme)) {
-		return BadRequest("source url scheme not supported")
+	if !(sourceURL.Scheme == "http" || sourceURL.Scheme == "https") {
+		return BadRequest("source url scheme not supported (supported schemes are: http, https)")
 	}
-	if !receiver.IsSchemeSupported(Scheme(targetURL.Scheme)) {
-		return BadRequest("target url scheme not supported")
+	if !(targetURL.Scheme == "http" || targetURL.Scheme == "https") {
+		return BadRequest("target url scheme not supported (supported schemes are: http, https)")
 	}
 
-	if !receiver.TargetExists(targetURL) {
+	if !receiver.targetExists(targetURL) {
 		return BadRequest("target does not exist")
 	}
-	if !receiver.TargetAccepts(targetURL) {
+	if !receiver.targetAccepts(sourceURL, targetURL) {
 		return BadRequest("target does not accept webmentions")
 	}
 
@@ -187,69 +237,110 @@ func (receiver *Receiver) Shutdown(ctx context.Context) {
 
 func (receiver *Receiver) processMention(mention IncomingMention) {
 	slog.Info("processing mention", "source", mention.Source.String(), "target", mention.Target.String())
-	// @todo: log any mentions, even (especially) invalid ones
-	rel, err := receiver.SourceToTargetRel(mention.Source, mention.Target)
-	if err != nil {
-		// @todo: log error
+
+	mime := "text/plain"
+	var status Status
+
+	{
+		// @todo: set fav content types in accepts header
+		resp, err := receiver.httpClient.Head(mention.Source.String())
+		if err != nil {
+			slog.Error(fmt.Sprintf("processing mention: %s", err), "mention", mention)
+			return
+		}
+		if resp.StatusCode == 410 {
+			status = StatusDeleted
+			// Processing should be idempotent
+			for _, listener := range receiver.listeners {
+				listener.Receive(mention, status)
+			}
+			return
+		}
+		if resp.StatusCode < 200 || resp.StatusCode > 300 {
+			slog.Error(fmt.Sprintf("processing mention: %s", ErrSourceNotFound), "mention", mention)
+			return
+		}
+		mime = resp.Header.Get("Content-Type")
+	}
+
+	handler, hasHandler := receiver.mediaHandler[mime]
+	if !hasHandler {
+		slog.Error("processing mention: no mime handler registered", "mention", mention, "mime", mime)
 		return
 	}
-	if rel != SourceDoesNotExist && rel != SourceDoesNotLinkToTarget {
-		// Processing should be idempotent
-		for _, listener := range receiver.listeners {
-			listener.Receive(mention, rel)
+
+	{
+		// @todo: set `mime` content types in accepts header
+		resp, err := receiver.httpClient.Get(mention.Source.String())
+		if err != nil {
+			slog.Error(fmt.Sprintf("processing mention: %s", err), "mention", mention)
+			return
 		}
+
+		handlerStatus, err := handler(resp.Body, mention.Target)
+		if err != nil {
+			slog.Error(fmt.Sprintf("processing mention: %s", err), "mention", mention)
+			return
+		}
+		status = handlerStatus // go things...
+	}
+
+	// Processing should be idempotent
+	for _, listener := range receiver.listeners {
+		listener.Receive(mention, status)
 	}
 }
 
-func (receiver *Receiver) TargetExists(target URL) bool {
-	return false // @todo: implement / user provided
-}
-
-func (receiver *Receiver) TargetAccepts(target URL) bool {
-	return false // @todo: implement / user provided
-}
-
-func (receiver *Receiver) IsSchemeSupported(scheme Scheme) bool {
-	for _, other := range receiver.schemes {
-		schemeLower := strings.ToLower(string(scheme))
-		otherLower := strings.ToLower(string(other))
-		if schemeLower == otherLower {
-			return true
-		}
-	}
-	return false
-}
-
-func (receiver *Receiver) SourceToTargetRel(source, target URL) (rel Relationship, err error) {
-	resp, err := receiver.httpClient.Head(source.String())
+func (receiver *Receiver) PlainHandler(content io.Reader, target URL) (status Status, err error) {
+	bs, err := io.ReadAll(content)
 	if err != nil {
-		return SourceDoesNotExist, err
+		return status, err
 	}
-	if resp.StatusCode == 410 {
-		return SourceGotDeleted, nil
+	if !strings.Contains(string(bs), target.String()) {
+		return StatusNoLink, nil
 	}
-	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
-		// Fetch source to verify that it really links to the target (must have an exact match)
-		//   - follow redirects, but limit it!
-		//   - Accept header to indicate preferred content type
-		//       - html: look for <a> <img> <video> etc.
-		//       - json: look for properties whose values are an exact match
-		//       - plain text: look for string match
-		//       - 410 Gone: source was deleted
+	return StatusLink, nil
+}
 
-		// source used to link to target, still does
-		return SourceUpdated, nil
-
-		// source used to link to target, doesn't anymore
-		return SourceRemovedTarget, nil
-
-		// source didn't link to target, does now
-		return SourceLinksToTarget, nil
-
-		// source didn't link to target, still doesn't
-		return SourceDoesNotLinkToTarget, nil
+func (receiver *Receiver) HtmlHandler(content io.Reader, target URL) (status Status, err error) {
+	doc, err := html.Parse(content)
+	if err != nil { // @todo: be a bit fault tolerant in parsing html? like browsers are
+		return status, err
 	}
 
-	// @todo: 404 or other 4XX but we know it linked to target in the past?
-	return SourceDoesNotExist, nil
+	var traverseHtml func(*html.Node) bool
+	traverseHtml = func(node *html.Node) (found bool) {
+		if node.Type == html.ElementNode {
+			switch node.Data {
+				case "a": fallthrough
+				case "img": fallthrough
+				case "video":
+				href := findHref(node)
+				if strings.ToLower(href) == strings.ToLower(target.String()) {
+					return true
+				}
+				//case "p":
+			}
+		}
+		for child := node.FirstChild; child != nil; child = child.NextSibling { // parse in depth-first order
+			if traverseHtml(child) {
+				return true
+			}
+		}
+		return false
+	}
+	if !traverseHtml(doc) {
+		return StatusNoLink, nil
+	}
+	return StatusLink, nil
+}
+
+func findHref(node *html.Node) (href string) {
+	for _, a := range node.Attr {
+		if a.Key == "href" { // @todo: what if there are multiple hrefs, for whatever reason?
+			href = a.Val
+			return
+		}
+	}
+	return
 }

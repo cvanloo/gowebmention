@@ -11,6 +11,9 @@ var (
 	ErrNoEndpointFound      = errors.New("no webmention endpoint found")
 	ErrNoRelWebmention      = errors.New("no webmention relationship found")
 	ErrInvalidRelWebmention = errors.New("target has invalid webmention url")
+	ErrSourceDeleted        = errors.New("source got deleted")
+	ErrSourceNotFound       = errors.New("source not found")
+	ErrSourceDoesNotLinkToTarget = errors.New("source does not link to target")
 )
 
 type (
