@@ -69,10 +69,10 @@ func main() {
 
 type WebmentionLogger struct{}
 
-func (wl WebmentionLogger) Receive(mention webmention.IncomingMention, rel webmention.Relationship) {
+func (wl WebmentionLogger) Receive(mention webmention.IncomingMention, status webmention.Status) {
 	slog.Info("received webmention",
 		"source", mention.Source.String(),
 		"target", mention.Target.String(),
-		"rel", rel,
+		"status", status,
 	)
 }

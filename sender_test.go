@@ -3,6 +3,8 @@ package webmention_test
 import (
 	"net/url"
 	"testing"
+	"net/http"
+	"net/http/httptest"
 
 	webmention "github.com/cvanloo/gowebmention"
 )
@@ -11,6 +13,7 @@ type Targets []struct {
 	Url      string
 	Comment  string
 	Expected string
+	SourceHandler func(http.ResponseWriter, *http.Request)
 }
 
 var targets = Targets{
@@ -138,7 +141,7 @@ func must[T any](t T, e error) T {
 	return t
 }
 
-func TestEndpointDiscovery(t *testing.T) {
+func TestEndpointDiscoveryRocks(t *testing.T) {
 	sender := webmention.NewSender()
 
 	for _, target := range targets {
@@ -154,7 +157,7 @@ func TestEndpointDiscovery(t *testing.T) {
 	}
 }
 
-func TestMentioning(t *testing.T) {
+func TestMentioningRocks(t *testing.T) {
 	sender := webmention.NewSender()
 
 	source := must(url.Parse("http://blog.vanloo.ch/test/webmention.html"))
@@ -167,8 +170,48 @@ func TestMentioning(t *testing.T) {
 	}
 }
 
-func TestMentioningUpdates(t *testing.T) {
+func TestMentioningUpdatesRocks(t *testing.T) {
 }
 
-func TestMentioningDeletes(t *testing.T) {
+func TestMentioningDeletesRocks(t *testing.T) {
+}
+
+var localTargets = Targets{
+	{
+		Url: "/test/1",
+		Comment: "HTTP Link header, unquoted rel, relative URL",
+		Expected: "/test/1/webmention?head=true",
+		SourceHandler: func(w http.ResponseWriter, r *http.Request) {
+			h := w.Header()
+			h.Add("Link", "</test/1/webmention?head=true>; rel=\"webmention\"")
+			w.WriteHeader(http.StatusOK)
+		},
+	},
+}
+
+func TestEndpointDiscoveryLocal(t *testing.T) {
+	sender := webmention.NewSender()
+
+	mux := http.NewServeMux()
+	for _, target := range localTargets {
+		mux.HandleFunc(target.Url, target.SourceHandler)
+	}
+	ts := httptest.NewServer(mux)
+	defer ts.Close()
+
+	for _, target := range localTargets {
+		url := must(url.Parse(ts.URL+target.Url))
+		expectedUrl := must(url.Parse(ts.URL+target.Expected))
+		endpoint, err := sender.DiscoverEndpoint(url)
+		if err != nil {
+			t.Log(target.Comment)
+			t.Errorf("endpoint discovery failed for: %s with reason: %s", url.String(), err)
+		} else if target.Expected != "" && endpoint.String() != expectedUrl.String() {
+			t.Log(target.Comment)
+			t.Errorf("endpoint discovery failed for: %s with reason: returned incorrect endpoint: %s, expected: %s", url.String(), endpoint, expectedUrl.String())
+		}
+	}
+}
+
+func TestMentioningLocal(t *testing.T) {
 }
