@@ -36,6 +36,9 @@ type (
 	TargetExistsFunc func(target URL) bool
 	TargetAcceptsFunc func(source, target URL) bool
 	Listener interface {
+		// @todo: that's a dumb interface
+		//   how about:
+		//   Receive(mention IncomingMention, sourceContent io.Reader, status Status)
 		Receive(mention IncomingMention, status Status)
 	}
 	Status string // @todo: not good that user defined handlers should only return two out of the three defined values
@@ -349,4 +352,11 @@ func findHref(node *html.Node) (href string) {
 		}
 	}
 	return
+}
+
+// @todo: put listeners into their own package ./listener/listeners.go
+var ListenerNotifyByMail = ListenerFunc(NotifyByMail)
+
+func NotifyByMail(mention IncomingMention, status Status) {
+	// @todo: send an email
 }
