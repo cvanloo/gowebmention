@@ -39,6 +39,7 @@ type (
 		Receive(mention IncomingMention, status Status)
 	}
 	Status string // @todo: not good that user defined handlers should only return two out of the three defined values
+	ListenerFunc func(mention IncomingMention, status Status)
 )
 
 const (
@@ -50,6 +51,10 @@ const (
 	StatusNoLink = "source does not link to target"
 	StatusDeleted = "source itself got deleted"
 )
+
+func (f ListenerFunc) Receive(mention IncomingMention, status Status) {
+	f(mention, status)
+}
 
 func NewReceiver(opts ...ReceiverOption) *Receiver {
 	queue := make(chan IncomingMention, defaultRequestQueueSize)
@@ -263,6 +268,7 @@ func (receiver *Receiver) processMention(mention IncomingMention) {
 		mime = resp.Header.Get("Content-Type")
 	}
 
+	// @todo: have to actually parse the Content-Type header and search through all the different mimes
 	handler, hasHandler := receiver.mediaHandler[mime]
 	if !hasHandler {
 		slog.Error("processing mention: no mime handler registered", "mention", mention, "mime", mime)
