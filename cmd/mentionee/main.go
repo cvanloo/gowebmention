@@ -40,7 +40,7 @@ func main() {
 		webmention.WithAcceptsFunc(func(source, target *url.URL) bool {
 			return true
 		}),
-		webmention.WithListener(WebmentionLogger{}),
+		webmention.WithNotifier(WebmentionLogger{}),
 	)
 
 	go receiver.ProcessMentions()

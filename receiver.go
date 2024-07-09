@@ -15,7 +15,7 @@ type (
 	Receiver struct {
 		enqueue    chan<- IncomingMention
 		dequeue    <-chan IncomingMention
-		listeners  []Listener
+		notifiers  []Notifier
 		httpClient *http.Client
 		shutdown   chan struct{}
 		targetExists TargetExistsFunc
@@ -35,7 +35,7 @@ type (
 	}
 	TargetExistsFunc func(target URL) bool
 	TargetAcceptsFunc func(source, target URL) bool
-	Listener interface {
+	Notifier interface {
 		// @todo: that's a dumb interface
 		//   how about:
 		//   Receive(mention IncomingMention, sourceContent io.Reader, status Status)
@@ -43,8 +43,8 @@ type (
 	}
 	Status string // @todo: not good that user defined handlers should only return two out of the three defined values
 
-	// ListenerFunc adapts a function to an object that implements the Listener interface.
-	ListenerFunc func(mention IncomingMention, status Status)
+	// NotifierFunc adapts a function to an object that implements the Notifier interface.
+	NotifierFunc func(mention IncomingMention, status Status)
 )
 
 const (
@@ -57,7 +57,7 @@ const (
 	StatusDeleted = "source itself got deleted"
 )
 
-func (f ListenerFunc) Receive(mention IncomingMention, status Status) {
+func (f NotifierFunc) Receive(mention IncomingMention, status Status) {
 	f(mention, status)
 }
 
@@ -85,9 +85,9 @@ func NewReceiver(opts ...ReceiverOption) *Receiver {
 	return receiver
 }
 
-func WithListener(listener ...Listener) ReceiverOption {
+func WithNotifier(notifiers ...Notifier) ReceiverOption {
 	return func(r *Receiver) {
-		r.listeners = append(r.listeners, listener...)
+		r.notifiers = append(r.notifiers, notifiers...)
 	}
 }
 
@@ -261,8 +261,8 @@ func (receiver *Receiver) processMention(mention IncomingMention) {
 		if resp.StatusCode == 410 {
 			status = StatusDeleted
 			// Processing should be idempotent
-			for _, listener := range receiver.listeners {
-				listener.Receive(mention, status)
+			for _, notifier := range receiver.notifiers {
+				notifier.Receive(mention, status)
 			}
 			return
 		}
@@ -297,8 +297,8 @@ func (receiver *Receiver) processMention(mention IncomingMention) {
 	}
 
 	// Processing should be idempotent
-	for _, listener := range receiver.listeners {
-		listener.Receive(mention, status)
+	for _, notifier := range receiver.notifiers {
+		notifier.Receive(mention, status)
 	}
 }
 

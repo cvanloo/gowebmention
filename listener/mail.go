@@ -25,6 +25,9 @@ func NewMailer(dialer *gomail.Dialer, sender, receiver string) Mailer {
 	}
 }
 
+// Mailer is a webmention.Notifier that -- whenever a mention is received --
+// sends an email notification from Sender to Receiver, with a subject line
+// produced by SubjectLine and the email body produced by Body.
 type Mailer struct {
 	Sender, Receiver string
 	Dialer *gomail.Dialer
@@ -32,6 +35,7 @@ type Mailer struct {
 	Body func(webmention.IncomingMention, webmention.Status) string
 }
 
+// Receive implements webmention.Notifier
 func (m Mailer) Receive(mention webmention.IncomingMention, status webmention.Status) {
 	msg := gomail.NewMessage()
 	msg.SetHeader("From", m.Sender)
