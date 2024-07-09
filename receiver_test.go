@@ -7,7 +7,6 @@ import (
 	//"testing"
 	//"net/http"
 	//"net/http/httptest"
-
 	//webmention "github.com/cvanloo/gowebmention"
 )
 

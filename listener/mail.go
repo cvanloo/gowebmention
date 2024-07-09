@@ -1,9 +1,9 @@
 package listener
 
 import (
-	"log/slog"
 	"fmt"
 	"gopkg.in/gomail.v2"
+	"log/slog"
 
 	webmention "github.com/cvanloo/gowebmention"
 )
@@ -13,9 +13,9 @@ import (
 // generate custom email subjects and contents, when notifying about Webmentions.
 func NewMailer(dialer *gomail.Dialer, sender, receiver string) Mailer {
 	return Mailer{
-		Sender: sender,
+		Sender:   sender,
 		Receiver: receiver,
-		Dialer: dialer,
+		Dialer:   dialer,
 		SubjectLine: func(webmention.IncomingMention, webmention.Status) string {
 			return "A post of yours has been mentioned"
 		},
@@ -30,9 +30,9 @@ func NewMailer(dialer *gomail.Dialer, sender, receiver string) Mailer {
 // produced by SubjectLine and the email body produced by Body.
 type Mailer struct {
 	Sender, Receiver string
-	Dialer *gomail.Dialer
-	SubjectLine func(webmention.IncomingMention, webmention.Status) string
-	Body func(webmention.IncomingMention, webmention.Status) string
+	Dialer           *gomail.Dialer
+	SubjectLine      func(webmention.IncomingMention, webmention.Status) string
+	Body             func(webmention.IncomingMention, webmention.Status) string
 }
 
 // Receive implements webmention.Notifier

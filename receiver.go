@@ -1,26 +1,26 @@
 package webmention
 
 import (
-	"golang.org/x/net/html"
-	"strings"
 	"context"
+	"fmt"
+	"golang.org/x/net/html"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/url"
-	"fmt"
-	"io"
+	"strings"
 )
 
 type (
 	Receiver struct {
-		enqueue    chan<- IncomingMention
-		dequeue    <-chan IncomingMention
-		notifiers  []Notifier
-		httpClient *http.Client
-		shutdown   chan struct{}
-		targetExists TargetExistsFunc
+		enqueue       chan<- IncomingMention
+		dequeue       <-chan IncomingMention
+		notifiers     []Notifier
+		httpClient    *http.Client
+		shutdown      chan struct{}
+		targetExists  TargetExistsFunc
 		targetAccepts TargetAcceptsFunc
-		mediaHandler map[string]MediaHandler
+		mediaHandler  map[string]MediaHandler
 	}
 
 	// A MediaHandler searches sourceData for the target link.
@@ -28,14 +28,14 @@ type (
 	// If no (exact) match is found, a status of StatusNoLink and a nil error must be returned.
 	// If error is non-nil, it is treated as an internal error and the value of status is ignored.
 	// Generally, on error, no listeners will be invoked.
-	MediaHandler func(sourceData io.Reader, target URL) (Status, error)
+	MediaHandler    func(sourceData io.Reader, target URL) (Status, error)
 	ReceiverOption  func(*Receiver)
 	IncomingMention struct {
 		Source, Target URL
 	}
-	TargetExistsFunc func(target URL) bool
+	TargetExistsFunc  func(target URL) bool
 	TargetAcceptsFunc func(source, target URL) bool
-	Notifier interface {
+	Notifier          interface {
 		// @todo: that's a dumb interface
 		//   how about:
 		//   Receive(mention IncomingMention, sourceContent io.Reader, status Status)
@@ -52,9 +52,9 @@ const (
 )
 
 const (
-	StatusLink Status = "source links to target"
-	StatusNoLink = "source does not link to target"
-	StatusDeleted = "source itself got deleted"
+	StatusLink    Status = "source links to target"
+	StatusNoLink         = "source does not link to target"
+	StatusDeleted        = "source itself got deleted"
 )
 
 func (f NotifierFunc) Receive(mention IncomingMention, status Status) {
@@ -77,7 +77,7 @@ func NewReceiver(opts ...ReceiverOption) *Receiver {
 	}
 	receiver.mediaHandler = map[string]MediaHandler{
 		"text/plain": receiver.PlainHandler,
-		"text/html": receiver.HtmlHandler,
+		"text/html":  receiver.HtmlHandler,
 	}
 	for _, opt := range opts {
 		opt(receiver)
@@ -108,6 +108,7 @@ func WithAcceptsFunc(accepts TargetAcceptsFunc) ReceiverOption {
 // The default handlers are:
 //   - text/plain: PlainHandler
 //   - text/html:  HtmlHandler
+//
 // To remove any of the default handlers, pass a nil handler.
 func WithMediaHandler(mime string, handler MediaHandler) ReceiverOption {
 	return func(r *Receiver) {
@@ -323,9 +324,11 @@ func (receiver *Receiver) HtmlHandler(content io.Reader, target URL) (status Sta
 	traverseHtml = func(node *html.Node) (found bool) {
 		if node.Type == html.ElementNode {
 			switch node.Data {
-				case "a": fallthrough
-				case "img": fallthrough
-				case "video":
+			case "a":
+				fallthrough
+			case "img":
+				fallthrough
+			case "video":
 				href := findHref(node)
 				if strings.ToLower(href) == strings.ToLower(target.String()) {
 					return true

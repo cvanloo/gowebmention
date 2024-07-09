@@ -9,14 +9,14 @@
 package main
 
 import (
-	"log/slog"
-	"os"
-	"encoding/json"
-	"net/url"
 	"bufio"
-	"net"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
+	"net"
+	"net/url"
+	"os"
 	"os/signal"
 	"syscall"
 
@@ -79,17 +79,17 @@ type (
 		Mentions []Mention `json:"mentions"`
 	}
 	Mention struct {
-		Source URL `json:"source"`
-		PastTargets []URL `json:"past_targets"`
+		Source         URL   `json:"source"`
+		PastTargets    []URL `json:"past_targets"`
 		CurrentTargets []URL `json:"current_targets"`
 	}
 	MentionsResponse struct {
 		Statuses []Status `json:"statuses"`
-		Error string `json:"error"`
+		Error    string   `json:"error"`
 	}
 	Status struct {
-		Source URL `json:"source"`
-		Error string `json:"error"`
+		Source URL    `json:"source"`
+		Error  string `json:"error"`
 	}
 )
 
@@ -101,7 +101,7 @@ func (u *URL) UnmarshalJSON(bs []byte) error {
 	if bs[0] != '"' || bs[len(bs)-1] != '"' {
 		return fmt.Errorf("malformed url value: %s: needs to be enclosed in quotes", string(bs))
 	}
-	s := string(bs[1:len(bs)-1])
+	s := string(bs[1 : len(bs)-1])
 	url, err := url.Parse(s)
 	u.URL = url
 	return err

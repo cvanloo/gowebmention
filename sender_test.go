@@ -1,20 +1,20 @@
 package webmention_test
 
 import (
-	"strings"
 	"fmt"
-	"net/url"
-	"testing"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"strings"
+	"testing"
 
 	webmention "github.com/cvanloo/gowebmention"
 )
 
 type Targets []struct {
-	Url      string
-	Comment  string
-	Expected string
+	Url           string
+	Comment       string
+	Expected      string
 	SourceHandler func(ts **httptest.Server) http.HandlerFunc
 }
 
@@ -180,8 +180,8 @@ func TestMentioningDeletesRocks(t *testing.T) {
 
 var localTargets = Targets{
 	{
-		Url: "/test/1",
-		Comment: "HTTP Link header, unquoted rel, relative URL",
+		Url:      "/test/1",
+		Comment:  "HTTP Link header, unquoted rel, relative URL",
 		Expected: "/test/1/webmention?head=true",
 		SourceHandler: func(ts **httptest.Server) http.HandlerFunc {
 			return func(w http.ResponseWriter, r *http.Request) {
@@ -192,8 +192,8 @@ var localTargets = Targets{
 		},
 	},
 	{
-		Url: "/test/2",
-		Comment: "HTTP Link header, unquoted rel, absolute URL",
+		Url:      "/test/2",
+		Comment:  "HTTP Link header, unquoted rel, absolute URL",
 		Expected: "/test/2/webmention?head=true",
 		SourceHandler: func(ts **httptest.Server) http.HandlerFunc {
 			return func(w http.ResponseWriter, r *http.Request) {
@@ -205,8 +205,8 @@ var localTargets = Targets{
 		},
 	},
 	{
-		Url: "/test/3",
-		Comment: "HTML <link> tag, relative URL",
+		Url:      "/test/3",
+		Comment:  "HTML <link> tag, relative URL",
 		Expected: "/test/3/webmention",
 		SourceHandler: func(ts **httptest.Server) http.HandlerFunc {
 			return func(w http.ResponseWriter, r *http.Request) {
@@ -227,8 +227,8 @@ var localTargets = Targets{
 		},
 	},
 	{
-		Url: "/test/4",
-		Comment: "HTML <link> tag, absolute URL",
+		Url:      "/test/4",
+		Comment:  "HTML <link> tag, absolute URL",
 		Expected: "/test/4/webmention",
 		SourceHandler: func(ts **httptest.Server) http.HandlerFunc {
 			return func(w http.ResponseWriter, r *http.Request) {
@@ -250,8 +250,8 @@ var localTargets = Targets{
 		},
 	},
 	{
-		Url: "/test/5",
-		Comment: "HTML <a> tag, relative URL",
+		Url:      "/test/5",
+		Comment:  "HTML <a> tag, relative URL",
 		Expected: "/test/5/webmention",
 		SourceHandler: func(ts **httptest.Server) http.HandlerFunc {
 			return func(w http.ResponseWriter, r *http.Request) {
@@ -274,8 +274,8 @@ var localTargets = Targets{
 		},
 	},
 	{
-		Url: "/test/6",
-		Comment: "HTML <a> tag, absolute URL",
+		Url:      "/test/6",
+		Comment:  "HTML <a> tag, absolute URL",
 		Expected: "/test/6/webmention",
 		SourceHandler: func(ts **httptest.Server) http.HandlerFunc {
 			return func(w http.ResponseWriter, r *http.Request) {
@@ -299,8 +299,8 @@ var localTargets = Targets{
 		},
 	},
 	{
-		Url: "/test/7",
-		Comment: "HTTP Link header with strange casing",
+		Url:      "/test/7",
+		Comment:  "HTTP Link header with strange casing",
 		Expected: "/test/7/webmention?head=true",
 		SourceHandler: func(ts **httptest.Server) http.HandlerFunc {
 			return func(w http.ResponseWriter, r *http.Request) {
@@ -311,8 +311,8 @@ var localTargets = Targets{
 		},
 	},
 	{
-		Url: "/test/8",
-		Comment: "HTTP Link header, quoted rel",
+		Url:      "/test/8",
+		Comment:  "HTTP Link header, quoted rel",
 		Expected: "/test/8/webmention?head=true",
 		SourceHandler: func(ts **httptest.Server) http.HandlerFunc {
 			return func(w http.ResponseWriter, r *http.Request) {
@@ -323,8 +323,8 @@ var localTargets = Targets{
 		},
 	},
 	{
-		Url: "/test/9",
-		Comment: "Multiple rel values on a <link> tag",
+		Url:      "/test/9",
+		Comment:  "Multiple rel values on a <link> tag",
 		Expected: "/test/9/webmention",
 		SourceHandler: func(ts **httptest.Server) http.HandlerFunc {
 			return func(w http.ResponseWriter, r *http.Request) {
@@ -346,8 +346,8 @@ var localTargets = Targets{
 		},
 	},
 	{
-		Url: "/test/10",
-		Comment: "Multiple rel values on a Link header",
+		Url:      "/test/10",
+		Comment:  "Multiple rel values on a Link header",
 		Expected: "/test/10/webmention?head=true",
 		SourceHandler: func(ts **httptest.Server) http.HandlerFunc {
 			return func(w http.ResponseWriter, r *http.Request) {
@@ -358,8 +358,8 @@ var localTargets = Targets{
 		},
 	},
 	{
-		Url: "/test/11",
-		Comment: "Multiple rel values on a Link header",
+		Url:      "/test/11",
+		Comment:  "Multiple rel values on a Link header",
 		Expected: "/test/11/webmention?head=true",
 		SourceHandler: func(ts **httptest.Server) http.HandlerFunc {
 			return func(w http.ResponseWriter, r *http.Request) {
@@ -386,8 +386,8 @@ var localTargets = Targets{
 		},
 	},
 	{
-		Url: "/test/12",
-		Comment: "Multiple rel values on a Link header",
+		Url:      "/test/12",
+		Comment:  "Multiple rel values on a Link header",
 		Expected: "/test/12/webmention",
 		SourceHandler: func(ts **httptest.Server) http.HandlerFunc {
 			return func(w http.ResponseWriter, r *http.Request) {
@@ -411,8 +411,8 @@ var localTargets = Targets{
 		},
 	},
 	{
-		Url: "/test/13",
-		Comment: "False endpoint inside an HTML comment",
+		Url:      "/test/13",
+		Comment:  "False endpoint inside an HTML comment",
 		Expected: "/test/13/webmention",
 		SourceHandler: func(ts **httptest.Server) http.HandlerFunc {
 			return func(w http.ResponseWriter, r *http.Request) {
@@ -439,8 +439,8 @@ var localTargets = Targets{
 		},
 	},
 	{
-		Url: "/test/14",
-		Comment: "False endpoint in escaped HTML",
+		Url:      "/test/14",
+		Comment:  "False endpoint in escaped HTML",
 		Expected: "/test/14/webmention",
 		SourceHandler: func(ts **httptest.Server) http.HandlerFunc {
 			return func(w http.ResponseWriter, r *http.Request) {
@@ -463,8 +463,8 @@ var localTargets = Targets{
 		},
 	},
 	{
-		Url: "/test/15",
-		Comment: "Webmention href is an empty string",
+		Url:      "/test/15",
+		Comment:  "Webmention href is an empty string",
 		Expected: "/test/15",
 		SourceHandler: func(ts **httptest.Server) http.HandlerFunc {
 			return func(w http.ResponseWriter, r *http.Request) {
@@ -488,8 +488,8 @@ var localTargets = Targets{
 		},
 	},
 	{
-		Url: "/test/16",
-		Comment: "Multiple Webmention endpoints advertised: <a>, <link>",
+		Url:      "/test/16",
+		Comment:  "Multiple Webmention endpoints advertised: <a>, <link>",
 		Expected: "/test/16/webmention",
 		SourceHandler: func(ts **httptest.Server) http.HandlerFunc {
 			return func(w http.ResponseWriter, r *http.Request) {
@@ -512,8 +512,8 @@ var localTargets = Targets{
 		},
 	},
 	{
-		Url: "/test/17",
-		Comment: "Multiple Webmention endpoints advertised: <link>, <a>",
+		Url:      "/test/17",
+		Comment:  "Multiple Webmention endpoints advertised: <link>, <a>",
 		Expected: "/test/17/webmention",
 		SourceHandler: func(ts **httptest.Server) http.HandlerFunc {
 			return func(w http.ResponseWriter, r *http.Request) {
@@ -537,8 +537,8 @@ var localTargets = Targets{
 		},
 	},
 	{
-		Url: "/test/18",
-		Comment: "Multiple HTTP Link headers",
+		Url:      "/test/18",
+		Comment:  "Multiple HTTP Link headers",
 		Expected: "/test/18/webmention?head=true",
 		SourceHandler: func(ts **httptest.Server) http.HandlerFunc {
 			return func(w http.ResponseWriter, r *http.Request) {
@@ -550,8 +550,8 @@ var localTargets = Targets{
 		},
 	},
 	{
-		Url: "/test/19",
-		Comment: "Single HTTP Link header with multiple values",
+		Url:      "/test/19",
+		Comment:  "Single HTTP Link header with multiple values",
 		Expected: "/test/19/webmention?head=true",
 		SourceHandler: func(ts **httptest.Server) http.HandlerFunc {
 			return func(w http.ResponseWriter, r *http.Request) {
@@ -562,8 +562,8 @@ var localTargets = Targets{
 		},
 	},
 	{
-		Url: "/test/20",
-		Comment: "Link tag with no href attribute",
+		Url:      "/test/20",
+		Comment:  "Link tag with no href attribute",
 		Expected: "/test/20/webmention",
 		SourceHandler: func(ts **httptest.Server) http.HandlerFunc {
 			return func(w http.ResponseWriter, r *http.Request) {
@@ -587,8 +587,8 @@ var localTargets = Targets{
 		},
 	},
 	{
-		Url: "/test/21",
-		Comment: "Webmention endpoint has query string parameters",
+		Url:      "/test/21",
+		Comment:  "Webmention endpoint has query string parameters",
 		Expected: "/test/21/webmention?query=yes",
 		SourceHandler: func(ts **httptest.Server) http.HandlerFunc {
 			return func(w http.ResponseWriter, r *http.Request) {
@@ -611,8 +611,8 @@ var localTargets = Targets{
 		},
 	},
 	{
-		Url: "/test/22",
-		Comment: "Webmention endpoint is relative to the path",
+		Url:      "/test/22",
+		Comment:  "Webmention endpoint is relative to the path",
 		Expected: "/test/22/webmention",
 		SourceHandler: func(ts **httptest.Server) http.HandlerFunc {
 			return func(w http.ResponseWriter, r *http.Request) {
@@ -635,8 +635,8 @@ var localTargets = Targets{
 		},
 	},
 	{
-		Url: "/test/23",
-		Comment: "Webmention target is a redirect and the endpoint is relative",
+		Url:      "/test/23",
+		Comment:  "Webmention target is a redirect and the endpoint is relative",
 		Expected: "/redirect/endpoint/webmention",
 		SourceHandler: func(ts **httptest.Server) http.HandlerFunc {
 			return func(w http.ResponseWriter, r *http.Request) {
@@ -679,8 +679,8 @@ func TestEndpointDiscoveryLocal(t *testing.T) {
 	defer ts.Close()
 
 	for _, target := range localTargets {
-		url := must(url.Parse(ts.URL+target.Url))
-		expectedUrl := must(url.Parse(ts.URL+target.Expected))
+		url := must(url.Parse(ts.URL + target.Url))
+		expectedUrl := must(url.Parse(ts.URL + target.Expected))
 		endpoint, err := sender.DiscoverEndpoint(url)
 		if err != nil {
 			t.Log(target.Comment)
@@ -758,7 +758,8 @@ func TestMentioningLocal(t *testing.T) {
 				switch r.Method {
 				default:
 					w.WriteHeader(http.StatusMethodNotAllowed)
-				case http.MethodHead: fallthrough
+				case http.MethodHead:
+					fallthrough
 				case http.MethodGet:
 					target.SourceHandler(&ts)(w, r)
 				case http.MethodPost:
@@ -793,7 +794,7 @@ func TestMentioningLocal(t *testing.T) {
 
 	ts = httptest.NewServer(mux)
 
-	source := must(url.Parse(ts.URL+sourceURL))
+	source := must(url.Parse(ts.URL + sourceURL))
 	for _, target := range localTargets {
 		err := sender.Mention(source, must(url.Parse(ts.URL+target.Url)))
 		if err != nil {

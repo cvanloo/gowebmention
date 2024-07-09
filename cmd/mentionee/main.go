@@ -8,9 +8,9 @@
 //
 // By registering listeners you can write your own logic to react to Webmentions:
 //
-//   receiver := webmention.NewReceiver(
-//      webmention.WithListener(customHandler),
-//   )
+//	receiver := webmention.NewReceiver(
+//	   webmention.WithListener(customHandler),
+//	)
 //
 // ...where customHandler implements the webmention.Listener interface.
 package main
@@ -21,11 +21,11 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
-	"net/url"
 
 	webmention "github.com/cvanloo/gowebmention"
 )
