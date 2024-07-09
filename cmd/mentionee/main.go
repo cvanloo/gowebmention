@@ -9,10 +9,10 @@
 // By registering listeners you can write your own logic to react to Webmentions:
 //
 //	receiver := webmention.NewReceiver(
-//	   webmention.WithListener(customHandler),
+//	   webmention.WithNotifier(customHandler),
 //	)
 //
-// ...where customHandler implements the webmention.Listener interface.
+// ...where customHandler implements the webmention.Notifier interface.
 package main
 
 import (
