@@ -42,6 +42,8 @@ type (
 		Receive(mention IncomingMention, status Status)
 	}
 	Status string // @todo: not good that user defined handlers should only return two out of the three defined values
+
+	// ListenerFunc adapts a function to an object that implements the Listener interface.
 	ListenerFunc func(mention IncomingMention, status Status)
 )
 
@@ -352,11 +354,4 @@ func findHref(node *html.Node) (href string) {
 		}
 	}
 	return
-}
-
-// @todo: put listeners into their own package ./listener/listeners.go
-var ListenerNotifyByMail = ListenerFunc(NotifyByMail)
-
-func NotifyByMail(mention IncomingMention, status Status) {
-	// @todo: send an email
 }
