@@ -1,6 +1,7 @@
 package webmention_test
 
 import (
+	"strings"
 	"fmt"
 	"net/url"
 	"testing"
@@ -324,7 +325,7 @@ var localTargets = Targets{
 	{
 		Url: "/test/9",
 		Comment: "Multiple rel values on a <link> tag",
-		Expected: "/test/9",
+		Expected: "/test/9/webmention",
 		SourceHandler: func(ts **httptest.Server) http.HandlerFunc {
 			return func(w http.ResponseWriter, r *http.Request) {
 				w.Write([]byte(fmt.Sprintf(
@@ -332,7 +333,7 @@ var localTargets = Targets{
 					<html lang="en">
 					<head>
 					<link rel="stylesheet" href="styles.css">
-					<link rel="something webmention" href="%s/test/9"
+					<link rel="something webmention" href="%s/test/9/webmention"
 					</head>
 					<body>
 					<h1>This is a test page.</h1>
@@ -684,7 +685,7 @@ func TestEndpointDiscoveryLocal(t *testing.T) {
 		if err != nil {
 			t.Log(target.Comment)
 			t.Errorf("endpoint discovery failed for: %s with reason: %s", url.String(), err)
-		} else if target.Expected != "" && endpoint.String() != expectedUrl.String() {
+		} else if endpoint.String() != expectedUrl.String() {
 			t.Log(target.Comment)
 			t.Errorf("endpoint discovery failed for: %s with reason: returned incorrect endpoint: %s, expected: %s", url.String(), endpoint, expectedUrl.String())
 		}
@@ -692,4 +693,114 @@ func TestEndpointDiscoveryLocal(t *testing.T) {
 }
 
 func TestMentioningLocal(t *testing.T) {
+	sender := webmention.NewSender()
+
+	sourceURL := "/test/webmention/source.html"
+
+	var ts *httptest.Server
+
+	mux := http.NewServeMux()
+	mux.HandleFunc(sourceURL, func(w http.ResponseWriter, r *http.Request) {
+		u := (*ts).URL
+		w.Write([]byte(fmt.Sprintf(
+			`<!DOCTYPE html>
+			<html lang="en">
+			<head>
+				<title>Inspirational Quotes</cite>
+			</head>
+			<body>
+				<p>
+				<figure>
+					<blockquote>
+						What you do today influences tomorrow, not the other way around.
+						Love today, and seize all tomorrows!
+					</blockquote>
+					<figcaption>
+					&mdash; <cite>Nemo Ramjet, All Tomorrows</cite>
+					</figcaption>
+				</figure>
+				</p>
+				<p>
+				More quotes: <a href="%s/test/1">here</a>
+				More quotes: <a href="%s/test/2">here</a>
+				More quotes: <a href="%s/test/3">here</a>
+				More quotes: <a href="%s/test/4">here</a>
+				More quotes: <a href="%s/test/5">here</a>
+				More quotes: <a href="%s/test/6">here</a>
+				More quotes: <a href="%s/test/7">here</a>
+				More quotes: <a href="%s/test/8">here</a>
+				More quotes: <a href="%s/test/9">here</a>
+				More quotes: <a href="%s/test/10">here</a>
+				More quotes: <a href="%s/test/11">here</a>
+				More quotes: <a href="%s/test/12">here</a>
+				More quotes: <a href="%s/test/13">here</a>
+				More quotes: <a href="%s/test/14">here</a>
+				More quotes: <a href="%s/test/15">here</a>
+				More quotes: <a href="%s/test/16">here</a>
+				More quotes: <a href="%s/test/17">here</a>
+				More quotes: <a href="%s/test/18">here</a>
+				More quotes: <a href="%s/test/19">here</a>
+				More quotes: <a href="%s/test/20">here</a>
+				More quotes: <a href="%s/test/21">here</a>
+				More quotes: <a href="%s/test/22">here</a>
+				More quotes: <a href="%s/test/23">here</a>
+				</p>
+			</body>
+			</html>`,
+			u, u, u, u, u, u, u, u, u, u, u, u, u, u, u, u, u, u, u, u, u, u, u,
+		)))
+	})
+
+	for _, target := range localTargets {
+		if target.Expected == target.Url {
+			target := target // I feel so stupid... Let's not talk about this ever again (time wasted: a solid 45min)
+			mux.HandleFunc(target.Url, func(w http.ResponseWriter, r *http.Request) {
+				switch r.Method {
+				default:
+					w.WriteHeader(http.StatusMethodNotAllowed)
+				case http.MethodHead: fallthrough
+				case http.MethodGet:
+					target.SourceHandler(&ts)(w, r)
+				case http.MethodPost:
+					w.WriteHeader(http.StatusAccepted)
+				}
+			})
+		} else {
+			mux.HandleFunc(target.Url, target.SourceHandler(&ts))
+			turl := strings.Split(target.Expected, "?")[0] // register pattern without the query params
+			mux.HandleFunc(turl, func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(http.StatusAccepted)
+			})
+		}
+	}
+
+	mux.HandleFunc("/redirect", func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(
+			`<!DOCTYPE html>
+			<html lang="en">
+			<head>
+			<link rel="stylesheet" href="styles.css">
+			</head>
+			<body>
+			<h1>You probably came here through a redirect.</h1>
+			<p>
+			Here is your endpoint: <a href="/redirect/endpoint/webmention" rel="webmention">webmention</a>.
+			</p>
+			</body>
+			</html>`,
+		))
+	})
+
+	ts = httptest.NewServer(mux)
+
+	source := must(url.Parse(ts.URL+sourceURL))
+	for _, target := range localTargets {
+		err := sender.Mention(source, must(url.Parse(ts.URL+target.Url)))
+		if err != nil {
+			t.Errorf("mentioning failed for: %s with reason: %s", target.Url, err)
+		}
+		//break
+	}
+
+	// @todo: check that actually the correct endpoint is contacted
 }

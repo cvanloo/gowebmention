@@ -77,6 +77,7 @@ func (sender *Sender) Mention(source, target URL) error {
 		slog.Group("request_info",
 			"source", source.String(),
 			"target", target.String(),
+			"endpoint", endpoint.String(),
 		),
 	)
 
@@ -96,20 +97,13 @@ func (sender *Sender) Mention(source, target URL) error {
 
 	switch resp.StatusCode {
 	case http.StatusOK:
-		log.Info("request was processed synchronously",
-			"endpoint", endpoint,
-		)
+		log.Info("request was processed synchronously")
 	case http.StatusCreated:
-		log.Info("request is being processed asynchronously",
-			"endpoint", endpoint,
-			"status_page", resp.Header.Values("Location"),
-		)
+		log.Info("request is being processed asynchronously", "status_page", resp.Header.Values("Location"))
 	case http.StatusAccepted:
-		log.Info("request is being processed asynchronously",
-			"endpoint", endpoint,
-		)
+		log.Info("request is being processed asynchronously")
 	default:
-		log.Info("non-standard success response code", "endpoint", endpoint)
+		log.Info("non-standard success response code")
 	}
 
 	return nil
