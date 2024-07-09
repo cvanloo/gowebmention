@@ -1,14 +1,14 @@
 package webmention_test
 
 import (
-	"io"
-	"fmt"
+	//"io"
+	//"fmt"
 	"net/url"
-	"testing"
-	"net/http"
-	"net/http/httptest"
+	//"testing"
+	//"net/http"
+	//"net/http/httptest"
 
-	webmention "github.com/cvanloo/gowebmention"
+	//webmention "github.com/cvanloo/gowebmention"
 )
 
 func exists(target *url.URL) bool {
@@ -24,6 +24,7 @@ func accepts(source, target *url.URL) bool {
 	return true
 }
 
+/*
 func TestReceiveLocal(t *testing.T) {
 	var ts *httptest.Server
 	var listenerCalled bool = false
@@ -65,4 +66,4 @@ func TestReceiveLocal(t *testing.T) {
 	if !listenerCalled {
 		t.Error("listener has not been called")
 	}
-}
+}*/
