@@ -40,7 +40,7 @@ func main() {
 		webmention.WithAcceptsFunc(func(source, target *url.URL) bool {
 			return true
 		}),
-		webmention.WithNotifier(webmention.NotifierFunc(func(mention webmention.IncomingMention) {
+		webmention.WithNotifier(webmention.NotifierFunc(func(mention webmention.Mention) {
 			slog.Info("received webmention",
 				"source", mention.Source.String(),
 				"target", mention.Target.String(),
@@ -78,9 +78,4 @@ func main() {
 		slog.Error(fmt.Sprintf("http shutdown error: %s", err))
 	}
 	receiver.Shutdown(shutdownCtx)
-}
-
-type WebmentionLogger struct{}
-
-func (wl WebmentionLogger) Receive(mention webmention.IncomingMention, status webmention.Status) {
 }

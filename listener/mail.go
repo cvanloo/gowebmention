@@ -16,11 +16,11 @@ func NewMailer(dialer *gomail.Dialer, sender, receiver string) Mailer {
 		Sender:   sender,
 		Receiver: receiver,
 		Dialer:   dialer,
-		SubjectLine: func(webmention.IncomingMention, webmention.Status) string {
+		SubjectLine: func(webmention.Mention) string {
 			return "A post of yours has been mentioned"
 		},
-		Body: func(mention webmention.IncomingMention, status webmention.Status) string {
-			return fmt.Sprintf("source: %s\ntarget: %s\nstatus: %s\n", mention.Source, mention.Target, status) // @todo: bake status into the mention
+		Body: func(mention webmention.Mention) string {
+			return fmt.Sprintf("source: %s\ntarget: %s\nstatus: %s\n", mention.Source, mention.Target, mention.Status)
 		},
 	}
 }
@@ -31,22 +31,19 @@ func NewMailer(dialer *gomail.Dialer, sender, receiver string) Mailer {
 type Mailer struct {
 	Sender, Receiver string
 	Dialer           *gomail.Dialer
-	SubjectLine      func(webmention.IncomingMention, webmention.Status) string
-	Body             func(webmention.IncomingMention, webmention.Status) string
+	SubjectLine      func(webmention.Mention) string
+	Body             func(webmention.Mention) string
 }
 
 // Receive implements webmention.Notifier
-func (m Mailer) Receive(mention webmention.IncomingMention, status webmention.Status) {
+func (m Mailer) Receive(mention webmention.Mention) {
 	msg := gomail.NewMessage()
 	msg.SetHeader("From", m.Sender)
 	msg.SetHeader("To", m.Receiver)
-	msg.SetHeader("Subject", m.SubjectLine(mention, status))
-	msg.SetBody("text/plain", m.Body(mention, status))
+	msg.SetHeader("Subject", m.SubjectLine(mention))
+	msg.SetBody("text/plain", m.Body(mention))
 	err := m.Dialer.DialAndSend(msg)
 	if err != nil {
-		slog.Error(fmt.Sprintf("NotifyByMail: failed to send email: %s", err),
-			"mention", mention,
-			"status", status,
-		)
+		slog.Error(fmt.Sprintf("NotifyByMail: failed to send email: %s", err), "mention", mention)
 	}
 }

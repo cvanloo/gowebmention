@@ -13,14 +13,13 @@ import (
 
 type (
 	Receiver struct {
-		enqueue       chan<- IncomingMention
-		dequeue       <-chan IncomingMention
+		enqueue       chan<- Mention
+		dequeue       <-chan Mention
 		notifiers     []Notifier
 		httpClient    *http.Client
 		shutdown      chan struct{}
 		targetExists  TargetExistsFunc
 		targetAccepts TargetAcceptsFunc
-		//history       HistoryFunc
 		mediaHandler map[string]MediaHandler // @todo: [:priority:]
 	}
 
@@ -31,19 +30,19 @@ type (
 	// Generally, on error, no listeners will be invoked.
 	MediaHandler    func(sourceData io.Reader, target URL) (Status, error)
 	ReceiverOption  func(*Receiver)
-	IncomingMention struct { // @todo: rename to just 'Mention'
+	Mention struct {
 		Source, Target URL
 		Status         Status // @todo: add: Details map[string]???
 	}
 	TargetExistsFunc  func(target URL) bool // @todo: only one of those
 	TargetAcceptsFunc func(source, target URL) bool
 	Notifier          interface {
-		Receive(mention IncomingMention)
+		Receive(mention Mention)
 	}
 	Status string // @todo: not good that user defined handlers should only return two out of the three defined values
 
 	// NotifierFunc adapts a function to an object that implements the Notifier interface.
-	NotifierFunc func(mention IncomingMention)
+	NotifierFunc func(mention Mention)
 )
 
 const (
@@ -56,12 +55,12 @@ const (
 	StatusDeleted        = "source itself got deleted"
 )
 
-func (f NotifierFunc) Receive(mention IncomingMention) {
+func (f NotifierFunc) Receive(mention Mention) {
 	f(mention)
 }
 
 func NewReceiver(opts ...ReceiverOption) *Receiver {
-	queue := make(chan IncomingMention, defaultRequestQueueSize)
+	queue := make(chan Mention, defaultRequestQueueSize)
 	receiver := &Receiver{
 		httpClient: http.DefaultClient,
 		enqueue:    queue,
@@ -73,9 +72,6 @@ func NewReceiver(opts ...ReceiverOption) *Receiver {
 		targetAccepts: func(URL, URL) bool {
 			return false
 		},
-		//history: func(source, target URL) History {
-		//	return DisableHistory
-		//},
 	}
 	receiver.mediaHandler = map[string]MediaHandler{
 		"text/html":  receiver.HtmlHandler,
@@ -124,7 +120,7 @@ func WithMediaHandler(mime string, handler MediaHandler) ReceiverOption {
 
 func WithQueueSize(size int) ReceiverOption {
 	return func(r *Receiver) {
-		queue := make(chan IncomingMention, size)
+		queue := make(chan Mention, size)
 		r.enqueue = queue
 		r.dequeue = queue
 	}
@@ -196,7 +192,7 @@ func (receiver *Receiver) Handle(w http.ResponseWriter, r *http.Request) error {
 	}
 
 	select {
-	case receiver.enqueue <- IncomingMention{sourceURL, targetURL, StatusNoLink}:
+	case receiver.enqueue <- Mention{sourceURL, targetURL, StatusNoLink}:
 	default:
 		return TooManyRequests()
 	}
@@ -248,7 +244,7 @@ func (receiver *Receiver) Shutdown(ctx context.Context) {
 	}
 }
 
-func (receiver *Receiver) processMention(mention IncomingMention) {
+func (receiver *Receiver) processMention(mention Mention) {
 	log := slog.With(
 		"function", "processMention",
 		slog.Group("request_info",
