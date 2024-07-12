@@ -2,13 +2,13 @@ package webmention
 
 import (
 	"context"
-	"fmt"
 	"golang.org/x/net/html"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/url"
 	"strings"
+	"github.com/elnormous/contenttype"
 )
 
 type (
@@ -20,7 +20,8 @@ type (
 		shutdown      chan struct{}
 		targetExists  TargetExistsFunc
 		targetAccepts TargetAcceptsFunc
-		mediaHandler  map[string]MediaHandler
+		//history       HistoryFunc
+		mediaHandler  map[string]MediaHandler // @todo: [:priority:]
 	}
 
 	// A MediaHandler searches sourceData for the target link.
@@ -30,21 +31,19 @@ type (
 	// Generally, on error, no listeners will be invoked.
 	MediaHandler    func(sourceData io.Reader, target URL) (Status, error)
 	ReceiverOption  func(*Receiver)
-	IncomingMention struct {
+	IncomingMention struct { // @todo: rename to just 'Mention'
 		Source, Target URL
+		Status         Status // @todo: add: Details map[string]???
 	}
-	TargetExistsFunc  func(target URL) bool
+	TargetExistsFunc  func(target URL) bool // @todo: only one of those
 	TargetAcceptsFunc func(source, target URL) bool
 	Notifier          interface {
-		// @todo: that's a dumb interface
-		//   how about:
-		//   Receive(mention IncomingMention, sourceContent io.Reader, status Status)
-		Receive(mention IncomingMention, status Status)
+		Receive(mention IncomingMention)
 	}
 	Status string // @todo: not good that user defined handlers should only return two out of the three defined values
 
 	// NotifierFunc adapts a function to an object that implements the Notifier interface.
-	NotifierFunc func(mention IncomingMention, status Status)
+	NotifierFunc func(mention IncomingMention)
 )
 
 const (
@@ -57,8 +56,8 @@ const (
 	StatusDeleted        = "source itself got deleted"
 )
 
-func (f NotifierFunc) Receive(mention IncomingMention, status Status) {
-	f(mention, status)
+func (f NotifierFunc) Receive(mention IncomingMention) {
+	f(mention)
 }
 
 func NewReceiver(opts ...ReceiverOption) *Receiver {
@@ -74,10 +73,13 @@ func NewReceiver(opts ...ReceiverOption) *Receiver {
 		targetAccepts: func(URL, URL) bool {
 			return false
 		},
+		//history: func(source, target URL) History {
+		//	return DisableHistory
+		//},
 	}
 	receiver.mediaHandler = map[string]MediaHandler{
-		"text/plain": receiver.PlainHandler,
 		"text/html":  receiver.HtmlHandler,
+		"text/plain": receiver.PlainHandler,
 	}
 	for _, opt := range opts {
 		opt(receiver)
@@ -194,7 +196,7 @@ func (receiver *Receiver) Handle(w http.ResponseWriter, r *http.Request) error {
 	}
 
 	select {
-	case receiver.enqueue <- IncomingMention{sourceURL, targetURL}:
+	case receiver.enqueue <- IncomingMention{sourceURL, targetURL, StatusNoLink}:
 	default:
 		return TooManyRequests()
 	}
@@ -247,59 +249,86 @@ func (receiver *Receiver) Shutdown(ctx context.Context) {
 }
 
 func (receiver *Receiver) processMention(mention IncomingMention) {
-	slog.Info("processing mention", "source", mention.Source.String(), "target", mention.Target.String())
+	log := slog.With(
+		"function", "processMention",
+		slog.Group("request_info",
+			"mention", mention,
+		),
+	)
+	log.Info("started processing")
+
+	//history := receiver.history(mention.Source, mention.Target)
 
 	mime := "text/plain"
-	var status Status
 
 	{
-		// @todo: set fav content types in accepts header
-		resp, err := receiver.httpClient.Head(mention.Source.String())
+		req, err := http.NewRequest(http.MethodHead, mention.Source.String(), nil)
 		if err != nil {
-			slog.Error(fmt.Sprintf("processing mention: %s", err), "mention", mention)
+			log.Error(err.Error())
+			return
+		}
+		for mime := range receiver.mediaHandler { // @todo: [:priority:]
+			req.Header.Add("Accept", mime)
+		}
+		resp, err := receiver.httpClient.Do(req)
+		if err != nil {
+			log.Error(err.Error())
 			return
 		}
 		if resp.StatusCode == 410 {
-			status = StatusDeleted
+			mention.Status = StatusDeleted
 			// Processing should be idempotent
 			for _, notifier := range receiver.notifiers {
-				notifier.Receive(mention, status)
+				notifier.Receive(mention)
 			}
 			return
 		}
 		if resp.StatusCode < 200 || resp.StatusCode > 300 {
-			slog.Error(fmt.Sprintf("processing mention: %s", ErrSourceNotFound), "mention", mention)
+			log.Error(ErrSourceNotFound.Error())
 			return
 		}
-		mime = resp.Header.Get("Content-Type")
+		// @todo: calculate this only once at initialization
+		availTypes := make([]contenttype.MediaType, 0, len(receiver.mediaHandler))
+		for mime := range receiver.mediaHandler {
+			availTypes = append(availTypes, contenttype.NewMediaType(mime))
+		}
+		mediaType, _, err := contenttype.GetAcceptableMediaTypeFromHeader(resp.Header.Get("Content-Type"), availTypes)
+		if err != nil {
+			log.Error(err.Error())
+		}
+		mime = mediaType.String()
 	}
 
-	// @todo: have to actually parse the Content-Type header and search through all the different mimes
 	handler, hasHandler := receiver.mediaHandler[mime]
 	if !hasHandler {
-		slog.Error("processing mention: no mime handler registered", "mention", mention, "mime", mime)
+		log.Error("no mime handler registered", "mime", mime)
 		return
 	}
 
 	{
-		// @todo: set `mime` content types in accepts header
-		resp, err := receiver.httpClient.Get(mention.Source.String())
+		req, err := http.NewRequest(http.MethodGet, mention.Source.String(), nil)
 		if err != nil {
-			slog.Error(fmt.Sprintf("processing mention: %s", err), "mention", mention)
+			log.Error(err.Error())
+			return
+		}
+		req.Header.Set("Accept", mime)
+		resp, err := receiver.httpClient.Do(req)
+		if err != nil {
+			log.Error(err.Error())
 			return
 		}
 
 		handlerStatus, err := handler(resp.Body, mention.Target)
 		if err != nil {
-			slog.Error(fmt.Sprintf("processing mention: %s", err), "mention", mention)
+			log.Error(err.Error())
 			return
 		}
-		status = handlerStatus // go things...
+		mention.Status = handlerStatus
 	}
 
 	// Processing should be idempotent
 	for _, notifier := range receiver.notifiers {
-		notifier.Receive(mention, status)
+		notifier.Receive(mention)
 	}
 }
 
