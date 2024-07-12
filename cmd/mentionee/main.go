@@ -34,9 +34,6 @@ const shutdownTimeout = 20 * time.Second
 
 func main() {
 	receiver := webmention.NewReceiver(
-		webmention.WithExistsFunc(func(target *url.URL) bool {
-			return true
-		}),
 		webmention.WithAcceptsFunc(func(source, target *url.URL) bool {
 			return true
 		}),

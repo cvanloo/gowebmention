@@ -18,7 +18,6 @@ type (
 		notifiers     []Notifier
 		httpClient    *http.Client
 		shutdown      chan struct{}
-		targetExists  TargetExistsFunc
 		targetAccepts TargetAcceptsFunc
 		mediaHandler map[string]MediaHandler // @todo: [:priority:]
 	}
@@ -34,7 +33,6 @@ type (
 		Source, Target URL
 		Status         Status // @todo: add: Details map[string]???
 	}
-	TargetExistsFunc  func(target URL) bool // @todo: only one of those
 	TargetAcceptsFunc func(source, target URL) bool
 	Notifier          interface {
 		Receive(mention Mention)
@@ -66,9 +64,6 @@ func NewReceiver(opts ...ReceiverOption) *Receiver {
 		enqueue:    queue,
 		dequeue:    queue,
 		shutdown:   make(chan struct{}),
-		targetExists: func(URL) bool {
-			return false
-		},
 		targetAccepts: func(URL, URL) bool {
 			return false
 		},
@@ -86,12 +81,6 @@ func NewReceiver(opts ...ReceiverOption) *Receiver {
 func WithNotifier(notifiers ...Notifier) ReceiverOption {
 	return func(r *Receiver) {
 		r.notifiers = append(r.notifiers, notifiers...)
-	}
-}
-
-func WithExistsFunc(exists TargetExistsFunc) ReceiverOption {
-	return func(r *Receiver) {
-		r.targetExists = exists
 	}
 }
 
@@ -184,9 +173,6 @@ func (receiver *Receiver) Handle(w http.ResponseWriter, r *http.Request) error {
 		return BadRequest("target url scheme not supported (supported schemes are: http, https)")
 	}
 
-	if !receiver.targetExists(targetURL) {
-		return BadRequest("target does not exist")
-	}
 	if !receiver.targetAccepts(sourceURL, targetURL) {
 		return BadRequest("target does not accept webmentions")
 	}
