@@ -172,11 +172,11 @@ func TestMentioningRocks(t *testing.T) {
 	}
 }
 
-func TestMentioningUpdatesRocks(t *testing.T) {
-}
-
-func TestMentioningDeletesRocks(t *testing.T) {
-}
+//func TestMentioningUpdatesRocks(t *testing.T) {
+//}
+//
+//func TestMentioningDeletesRocks(t *testing.T) {
+//}
 
 var localTargets = Targets{
 	{

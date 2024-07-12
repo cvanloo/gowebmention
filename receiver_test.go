@@ -1,39 +1,42 @@
 package webmention_test
 
 import (
-	//"io"
-	//"fmt"
+	"io"
+	"fmt"
 	"net/url"
-	//"testing"
-	//"net/http"
-	//"net/http/httptest"
-	//webmention "github.com/cvanloo/gowebmention"
+	"testing"
+	"net/http"
+	"net/http/httptest"
+	"sync"
+	"log/slog"
+	webmention "github.com/cvanloo/gowebmention"
 )
-
-func exists(target *url.URL) bool {
-	switch target.Path {
-	default:
-		return false
-	case "/target/1":
-		return true
-	}
-}
 
 func accepts(source, target *url.URL) bool {
 	return true
 }
 
-/*
 func TestReceiveLocal(t *testing.T) {
 	var ts *httptest.Server
-	var listenerCalled bool = false
+
+	wg := sync.WaitGroup{}
+	wg.Add(1) // either Done() in Report or in NotifierFunc
+
+	webmention.Report = func(err error) {
+		if err != nil {
+			defer wg.Done()
+			t.Fatal(err) // stop test
+		}
+	}
 
 	receiver := webmention.NewReceiver(
-		webmention.WithExistsFunc(exists),
 		webmention.WithAcceptsFunc(accepts),
-		webmention.WithListener(webmention.ListenerFunc(func(mention webmention.IncomingMention, status webmention.Status) {
-			listenerCalled = true
-			t.Logf("listener: mention: %#v, status: %s", mention, status)
+		webmention.WithNotifier(webmention.NotifierFunc(func(mention webmention.Mention) {
+			defer wg.Done()
+			slog.Info("notifier got called", "mention", mention)
+			if mention.Status != webmention.StatusLink {
+				t.Errorf("incorrect status, got: %s, want: %s", mention.Status, webmention.StatusLink)
+			}
 		})),
 	)
 
@@ -60,9 +63,5 @@ func TestReceiveLocal(t *testing.T) {
 		t.Logf("body: %s", must(io.ReadAll(resp.Body)))
 	}
 
-	// @todo: have to figure out how to make sure that the listener is called, or not.
-
-	if !listenerCalled {
-		t.Error("listener has not been called")
-	}
-}*/
+	wg.Wait()
+}
