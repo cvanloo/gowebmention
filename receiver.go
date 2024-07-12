@@ -2,13 +2,13 @@ package webmention
 
 import (
 	"context"
+	"github.com/elnormous/contenttype"
 	"golang.org/x/net/html"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/url"
 	"strings"
-	"github.com/elnormous/contenttype"
 )
 
 type (
@@ -21,7 +21,7 @@ type (
 		targetExists  TargetExistsFunc
 		targetAccepts TargetAcceptsFunc
 		//history       HistoryFunc
-		mediaHandler  map[string]MediaHandler // @todo: [:priority:]
+		mediaHandler map[string]MediaHandler // @todo: [:priority:]
 	}
 
 	// A MediaHandler searches sourceData for the target link.

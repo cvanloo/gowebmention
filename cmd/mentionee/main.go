@@ -40,7 +40,7 @@ func main() {
 		webmention.WithAcceptsFunc(func(source, target *url.URL) bool {
 			return true
 		}),
-		webmention.WithNotifier(webmention.NotifierFunc(func (mention webmention.IncomingMention) {
+		webmention.WithNotifier(webmention.NotifierFunc(func(mention webmention.IncomingMention) {
 			slog.Info("received webmention",
 				"source", mention.Source.String(),
 				"target", mention.Target.String(),
