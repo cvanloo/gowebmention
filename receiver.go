@@ -80,7 +80,9 @@ func NewReceiver(opts ...ReceiverOption) *Receiver {
 		"text/plain": receiver.PlainHandler,
 	}
 	for _, opt := range opts {
-		opt(receiver)
+		if opt != nil {
+			opt(receiver)
+		}
 	}
 	return receiver
 }

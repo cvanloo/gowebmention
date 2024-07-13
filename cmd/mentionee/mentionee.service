@@ -6,3 +6,4 @@ After=network.target network-online.target
 [Service]
 ExecStart=/usr/local/bin/mentionee
 Restart=on-failure
+Type=notify-reload
