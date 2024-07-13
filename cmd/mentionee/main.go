@@ -30,6 +30,10 @@ import (
 	webmention "github.com/cvanloo/gowebmention"
 )
 
+func init() {
+	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, nil)))
+}
+
 const shutdownTimeout = 20 * time.Second
 
 func main() {

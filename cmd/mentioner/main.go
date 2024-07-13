@@ -26,6 +26,7 @@ import (
 var sender webmention.WebMentionSender
 
 func init() {
+	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, nil)))
 	sender = webmention.NewSender()
 }
 
