@@ -118,7 +118,7 @@ appLoop:
 					"status", mention.Status,
 				)
 			})),
-			configureOrNil(notifyByMail, configureMailer()),
+			configureOrNil(notifyByMail, configureMailer),
 		)
 
 		go receiver.ProcessMentions()
@@ -173,9 +173,9 @@ func wordToBool(word string) bool {
 	return false
 }
 
-func configureOrNil(shouldConfigure bool, option webmention.ReceiverOption) webmention.ReceiverOption {
+func configureOrNil(shouldConfigure bool, option func() webmention.ReceiverOption) webmention.ReceiverOption {
 	if shouldConfigure {
-		return option
+		return option()
 	}
 	return nil
 }
@@ -216,5 +216,6 @@ func configureMailer() webmention.ReceiverOption {
 	}
 	dialer := gomail.NewDialer(host, port, user, pass)
 	mailer := listener.NewMailer(dialer, sendMailsFrom, sendMailsTo)
+	slog.Info("enabling email notifications")
 	return webmention.WithNotifier(mailer)
 }
