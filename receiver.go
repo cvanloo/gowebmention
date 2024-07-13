@@ -56,7 +56,7 @@ const (
 
 var Report = report
 
-func report(err error) {
+func report(err error, mention Mention) {
 	// do nothing
 }
 
@@ -210,7 +210,7 @@ func (receiver *Receiver) ProcessMentions() {
 			if !ok {
 				return
 			}
-			Report(receiver.processMention(mention))
+			Report(receiver.processMention(mention), mention)
 		}
 	}
 }
@@ -233,7 +233,7 @@ func (receiver *Receiver) Shutdown(ctx context.Context) {
 			if !ok {
 				return
 			}
-			Report(receiver.processMention(mention))
+			Report(receiver.processMention(mention), mention)
 		}
 	}
 }
@@ -271,7 +271,8 @@ func (receiver *Receiver) processMention(mention Mention) error {
 			return err
 		}
 		if resp.StatusCode < 200 || resp.StatusCode > 300 {
-			log.Error(ErrSourceNotFound.Error())
+			err = ErrSourceNotFound
+			log.Error(err.Error())
 			return err
 		}
 		mediaType, _, err := mimelib.ParseMediaType(resp.Header.Get("Content-Type"))
@@ -282,13 +283,13 @@ func (receiver *Receiver) processMention(mention Mention) error {
 		mime = mediaType
 	}
 
-	handler, hasHandler := receiver.mediaHandler[mime]
-	if !hasHandler {
-		log.Error("no mime handler registered", "mime", mime)
-		return fmt.Errorf("no mime handler registered for: %s", mime)
-	}
-
 	{
+		handler, hasHandler := receiver.mediaHandler[mime]
+		if !hasHandler {
+			log.Error("no mime handler registered", "mime", mime)
+			return fmt.Errorf("no mime handler registered for: %s", mime)
+		}
+
 		req, err := http.NewRequest(http.MethodGet, mention.Source.String(), nil)
 		if err != nil {
 			log.Error(err.Error())
