@@ -32,15 +32,16 @@ Also note that the library does not persist anything.
 It is on you to remember `pastMentions`.
 
 To receive webmentions setup an http endpoint and get the processing goroutine going.
-Also register one or more listeners, with your custom logic describing how to react to a mention.
+Also register one or more notifiers, with your custom logic describing how to react to a mention.
 
 ```go
 receiver := webmention.NewReceiver(
-  webmention.WithListener(
+  webmention.WithNotifier(
     // your custom handlers
     LogMentions,
     SaveMentionsToDB,
     NotifyOnMatrix,
+    NotifyByEMail,
   ),
 )
 
@@ -48,27 +49,43 @@ receiver := webmention.NewReceiver(
 // webmentions that pass validation are passed on to the listeners
 go receiver.ProcessMentions()
 
-http.HandleFunc("/webmention", receiver.WebmentionEndpoint) // register webmention endpoint
+http.HandleFunc("/api/webmention", receiver.WebmentionEndpoint) // register webmention endpoint
 http.ListenAndServe(":8080", nil)
 ```
 
-For a more comprehensive example, including how to cleanly shutdown the receiver, look at the [example implementation](cmd/receiver/main.go).
+For a more comprehensive example, including how to cleanly shutdown the receiver, look at the [example implementation](cmd/mentionee/main.go).
 
-Listeners need to implement the `Listener` interface, which defines a single `Receive` method.
+Notifiers need to implement the `Notifier` interface, which defines a single `Receive` method.
 
 ```go
 type MentionLogger struct{}
-func (MentionLogger) Receive(mention webmention.IncomingMention, rel webmention.Relationship) {
-  slog.Info("received mention", "source", mention.Source.String(), "target", mention.Target.String(), "rel", rel)
+func (MentionLogger) Receive(mention webmention.Mention) {
+  slog.Info("received mention", "mention", mention)
 }
 var LogMentions MentionLogger
 ```
 
 ## Run as a service
 
-[Sender](cmd/sender/) can be run as a daemon to listen for commands on a socket.
+### Sending Webmentions
+
+[Mentioner](cmd/mentioner/) can be run as a daemon to listen for commands on a socket.
+
+```sh
+cd cmd/mentioner
+go build .
+sudo cp mentioner /usr/local/bin/
+sudo cp mentioner.service mentioner.socket /etc/systemd/system/
+sudo systemctl start mentioner.socket
+```
 
 Something managing a source, eg., a blogging software, can send a command through the socket, instructing the Sender to send out webmentions.
+
+```sh
+socat - UNIX-CONNECT:/var/run/mentioner.socket
+{"mentions":[{"source":"https://example.com/blog.html","past_targets":[],"current_targets":["https://example.com/some_other_blog.html"]}]}
+
+```
 
 A command has the following JSON structure:
 
@@ -80,20 +97,19 @@ A command has the following JSON structure:
       "past_targets": [
         "<target 1 url>",
         "<target 2 url>",
-        ...
+        "<target ... url>"
       ],
       "current_targets": [
         "<target 1 url>",
         "<target 2 url>",
-        ...
+        "<target ... url>"
       ]
     },
     {
       "source": "<source 2 url>",
-      "past_targets": [...],
-      "current_targets": [...],
-    },
-    ...
+      "past_targets": [],
+      "current_targets": []
+    }
   ]
 }
 ```
@@ -109,7 +125,6 @@ The daemon responds for each mention with whether it was successful or not:
       "source": "<source 1 url>",
       "error": ""
     }
-    ...
   ],
   "error": ""
 }
@@ -117,4 +132,51 @@ The daemon responds for each mention with whether it was successful or not:
 
 An empty error string indicates success.
 
-TODO: Finish implementing logic, then write this section.
+### Receiving Webmentions
+
+[Mentionee](cmd/mentionee/) is a daemon that listens to incoming Webmentions.
+
+```sh
+cd cmd/mentionee
+go build .
+sudo cp mentionee /usr/local/bin/
+sudo cp mentionee.service /etc/systemd/system/
+sudo systemctl start mentionee.service
+```
+
+Since it listens on a local port (per default :8080), you can configure your web server to forward requests to it.
+
+```nginx
+location = /api/webmention {
+	proxy_pass http://localhost:8080;
+	proxy_set_header Host $host;
+	proxy_set_header X-Real-IP $remote_addr;
+	proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+}
+```
+
+Don't forget to advertise your Webmention endpoint!
+
+One way is by sending `Link` headers:
+
+```nginx
+location ~* \.html$ {
+	expires 30d;
+	add_header Cache-Control public;
+	add_header Link "</api/webmention>; rel=webmention";
+}
+```
+
+Another options is to add a `<link>` to your blog posts:
+
+```html
+<html lang="en">
+    <head>
+        <meta charset="utf-8">
+        <link rel="webmention" href="/api/webmention"> <!-- << advertise webmention endpoint here << -->
+  </head>
+  <body>
+    <!-- Some super exciting blog post... -->
+  </body>
+</html>
+```
