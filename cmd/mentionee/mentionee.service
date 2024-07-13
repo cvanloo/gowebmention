@@ -1,0 +1,8 @@
+[Unit]
+Description=Mentionee listens for incoming Webmention requests and processes them.
+Wants=network-online.target
+After=network.target network-online.target
+
+[Service]
+ExecStart=/usr/local/bin/mentionee
+Restart=on-failure
