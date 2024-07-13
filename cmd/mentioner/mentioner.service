@@ -1,0 +1,7 @@
+[Unit]
+Description=Mentioner listens on a Socket and sends Webmention requests.
+PartOf=mentioner.socket
+
+[Service]
+ExecStart=/usr/local/bin/mentioner
+NonBlocking=true

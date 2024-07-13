@@ -41,10 +41,23 @@ func main() {
 	// example request:
 	// {"mentions":[{"source":"http://localhost:8080/hello.html","past_targets":[],"current_targets":["http://localhost:8080/bye.html"]}]}
 
-	listener, err := net.Listen("unix", "/tmp/wmsend.sock") // @todo: configure socket, default somewhere in /var ?
+	// cd cmd/mentioner/
+	// go build .
+	// sudo cp mentioner /usr/local/bin/mentioner
+	// sudo cp mentioner.service mentioner.socket /etc/systemd/system/
+	// sudo systemctl start mentioner.socket
+	// socat - UNIX-CONNECT:/var/run/mentioner.socket
+
+	fd := os.NewFile(3, "mentioner.socket")
+	listener, err := net.FileListener(fd)
 	if err != nil {
-		slog.Error(err.Error())
-		os.Exit(1)
+		slog.Info("no valid socket passed as fd=3, creating /tmp/mentioner.socket instead")
+		l, err := net.Listen("unix", "/tmp/mentioner.socket")
+		if err != nil {
+			slog.Error(err.Error())
+			os.Exit(1)
+		}
+		listener = l
 	}
 
 	go func() {
