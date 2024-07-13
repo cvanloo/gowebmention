@@ -41,6 +41,7 @@ func main() {
 		webmention.WithAcceptsFunc(func(source, target *url.URL) bool {
 			return true
 		}),
+		// @todo: add various notifiers depending on config
 		webmention.WithNotifier(webmention.NotifierFunc(func(mention webmention.Mention) {
 			slog.Info("received webmention",
 				"source", mention.Source.String(),
@@ -53,7 +54,7 @@ func main() {
 	go receiver.ProcessMentions()
 
 	mux := &http.ServeMux{}
-	mux.HandleFunc("/webmention", receiver.WebmentionEndpoint)
+	mux.HandleFunc("/api/webmention", receiver.WebmentionEndpoint) // @todo: make path configurable
 
 	server := http.Server{
 		Addr:    ":8080",

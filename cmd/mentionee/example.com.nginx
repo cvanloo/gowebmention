@@ -1,0 +1,45 @@
+server {
+	server_name example.com;
+	listen 80;
+	listen [::]:80;
+	root /var/www/html/example.com;
+	index index.html;
+
+	location ~* \.html$ {
+		expires 30d;
+		add_header Cache-Control public;
+		add_header Link "</api/webmention>; rel=webmention";
+	}
+
+	location ~* ^.+\.(?:css|js|jpe?g|png|xml|woff|woff2|svg|avif|webm|webp|jxl|ttf)$ {
+		expires 30d;
+		add_header Cache-Control public;
+	}
+
+	location = / {
+		expires 4h;
+		add_header Cache-Control public;
+	}
+
+	location = /index.html {
+		expires 4h;
+		add_header Cache-Control public;
+	}
+
+	location = /feed.rss {
+		expires 1h;
+		add_header Cache-Control public;
+	}
+
+	location = /feed.atom {
+		expires 1h;
+		add_header Cache-Control public;
+	}
+
+	location = /api/webmention {
+		proxy_pass http://localhost:8080;
+		proxy_set_header Host $host;
+		proxy_set_header X-Real-IP $remote_addr;
+		proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+	}
+}
