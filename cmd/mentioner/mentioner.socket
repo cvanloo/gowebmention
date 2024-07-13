@@ -1,0 +1,8 @@
+[Unit]
+Description=Systemd socket for Mentioner
+AssertPathExists=/var/run
+Requires=mentioner.service
+
+[Socket]
+ListenStream=/var/run/mentioner.socket
+NoDelay=true
