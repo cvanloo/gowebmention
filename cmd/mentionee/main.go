@@ -20,6 +20,7 @@
 //   - MAIL_PASS=Password: Password to authenticate to the outgoing mail server (no default, required by NOTIFY_BY_MAIL)
 //   - MAIL_FROM=E-Mail address: Address used in the FROM header (default same as MAIL_USER)
 //   - MAIL_TO=E-Mail address: Address used in the TO header (default same as MAIL_FROM or MAIL_USER)
+//   - NOTIFY_BY_MATRIX=yes or no: Whether or not to enable notifications by a Matrix bot (default no)
 //
 // Configuration is reloaded on SIGHUP.
 package main
@@ -38,6 +39,7 @@ import (
 	"time"
 	"strconv"
 
+	"maunium.net/go/mautrix"
 	"gopkg.in/gomail.v2"
 	"github.com/joho/godotenv"
 	webmention "github.com/cvanloo/gowebmention"
@@ -59,6 +61,7 @@ const (
 	defaultEndpoint = "/api/webmention"
 	defaultListenAddr = ":8080"
 	defaultNotifyByMail = false
+	defaultNotifyByMatrix = false
 )
 
 var (
@@ -66,6 +69,7 @@ var (
 	endpoint = defaultEndpoint
 	listenAddr = defaultListenAddr
 	notifyByMail = defaultNotifyByMail
+	notifyByMatrix = defaultNotifyByMatrix
 )
 
 func loadConfig() {
@@ -94,6 +98,11 @@ func loadConfig() {
 	if notifyByMailStr := os.Getenv("NOTIFY_BY_MAIL"); notifyByMailStr != "" {
 		notifyByMail = wordToBool(notifyByMailStr)
 	}
+
+	notifyByMatrix = defaultNotifyByMatrix
+	if notifyByMatrixStr := os.Getenv("NOTIFY_BY_MATRIX"); notifyByMatrixStr != "" {
+		notifyByMatrix = wordToBool(notifyByMatrixStr)
+	}
 }
 
 func main() {
@@ -119,6 +128,7 @@ appLoop:
 				)
 			})),
 			configureOrNil(notifyByMail, configureMailer),
+			configureOrNil(notifyByMatrix, configureMatrix),
 		)
 
 		go receiver.ProcessMentions()
@@ -136,6 +146,7 @@ appLoop:
 			//err := server.ListenAndServeTLS()
 			if err != nil && !errors.Is(err, http.ErrServerClosed) {
 				slog.Error(fmt.Sprintf("http server error: %s", err))
+				os.Exit(ExitFailure)
 			}
 		}()
 
@@ -218,4 +229,32 @@ func configureMailer() webmention.ReceiverOption {
 	mailer := listener.NewMailer(dialer, sendMailsFrom, sendMailsTo)
 	slog.Info("enabling email notifications")
 	return webmention.WithNotifier(mailer)
+}
+
+func configureMatrix() webmention.ReceiverOption {
+	client, err := mautrix.NewClient("http://192.168.1.233:8008/", "@testikus@192.168.1.233", "")
+	if err != nil {
+		panic(err)
+	}
+	respLogin, err := client.Login(context.Background(), &mautrix.ReqLogin{
+		Type: mautrix.AuthTypePassword,
+		Identifier: mautrix.UserIdentifier{
+			Type: "m.id.user",
+			User: "testikus",
+		},
+		Password: "testtest",
+		StoreCredentials: true,
+	})
+	slog.Info("login homeserver", "resp", respLogin)
+	if err != nil {
+		panic(err)
+	}
+	respJoin, err := client.JoinRoom(context.Background(), "!vY4xbK99YKwMwZ9H:localhost", "http://192.168.1.233:8008/", nil)
+	slog.Info("join room", "resp", respJoin)
+	if err != nil {
+		panic(err)
+	}
+	bot := listener.NewMatrixBot(client, "!vY4xbK99YKwMwZ9H:localhost")
+	slog.Info("enabling matrix notifications")
+	return webmention.WithNotifier(bot)
 }
