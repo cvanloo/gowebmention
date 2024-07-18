@@ -61,6 +61,7 @@ const (
 	defaultEndpoint = "/api/webmention"
 	defaultListenAddr = ":8080"
 	defaultNotifyByMail = false
+	defaultNotifyByXMPP = false
 	defaultNotifyByMatrix = false
 )
 
@@ -69,6 +70,7 @@ var (
 	endpoint = defaultEndpoint
 	listenAddr = defaultListenAddr
 	notifyByMail = defaultNotifyByMail
+	notifyByXMPP = defaultNotifyByXMPP
 	notifyByMatrix = defaultNotifyByMatrix
 )
 
@@ -97,6 +99,11 @@ func loadConfig() {
 	notifyByMail = defaultNotifyByMail
 	if notifyByMailStr := os.Getenv("NOTIFY_BY_MAIL"); notifyByMailStr != "" {
 		notifyByMail = wordToBool(notifyByMailStr)
+	}
+
+	notifyByXMPP = defaultNotifyByXMPP
+	if notifyByXMPPStr := os.Getenv("NOTIFY_BY_XMPP"); notifyByXMPPStr != "" {
+		notifyByXMPP = wordToBool(notifyByXMPPStr)
 	}
 
 	notifyByMatrix = defaultNotifyByMatrix
@@ -128,6 +135,7 @@ appLoop:
 				)
 			})),
 			configureOrNil(notifyByMail, configureMailer),
+			configureOrNil(notifyByXMPP, configureXMPP),
 			configureOrNil(notifyByMatrix, configureMatrix),
 		)
 
@@ -229,6 +237,13 @@ func configureMailer() webmention.ReceiverOption {
 	mailer := listener.NewMailer(dialer, sendMailsFrom, sendMailsTo)
 	slog.Info("enabling email notifications")
 	return webmention.WithNotifier(mailer)
+}
+
+func configureXMPP() webmention.ReceiverOption {
+	botUser := ...
+	room := ...
+
+	return webmention.WithNotifier(nil)
 }
 
 func configureMatrix() webmention.ReceiverOption {
