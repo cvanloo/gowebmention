@@ -39,6 +39,9 @@ import (
 	"time"
 	"strconv"
 
+	"mellium.im/xmpp"
+	"mellium.im/xmpp/jid"
+	"mellium.im/xmpp/sasl"
 	"maunium.net/go/mautrix"
 	"gopkg.in/gomail.v2"
 	"github.com/joho/godotenv"
@@ -240,10 +243,40 @@ func configureMailer() webmention.ReceiverOption {
 }
 
 func configureXMPP() webmention.ReceiverOption {
-	botUser := ...
+	botJID, err := jid.Parse(os.Getenv("XMPP_BOT_USER"))
+	if err != nil {
+		slog.Error("missing configuration XMPP_BOT_USER=JID")
+		os.Exit(ExitConfigError)
+		return nil
+	}
+	botPass := os.Getenv("XMPP_BOT_PASS")
+	if botPass == "" {
+		slog.Error("missing configuration XMPP_BOT_PASS=pass")
+		os.Exit(ExitConfigError)
+		return nil
+	}
 	room := ...
 
-	return webmention.WithNotifier(nil)
+	session, err := xmpp.DialClientSession(
+		context.Background(),
+		botJID,
+		xmpp.StartTLS(nil),
+		xmpp.SASL("", botPass, sasl.ScramSha256Plus, sasl.ScramSha256, sasl.ScramSha1Plus, sasl.ScramSha1, sasl.Plain),
+		xmpp.BindResource(),
+	)
+	if err != nil {
+		slog.Error(err)
+		os.Exit(ExitConfigError)
+		return nil
+	}
+
+	xmppBot, err := listener.NewXMPP(session)
+	if err != nil {
+		slog.Error(err)
+		os.Exit(ExitConfigError)
+		return nil
+	}
+	return webmention.WithNotifier(xmppBot)
 }
 
 func configureMatrix() webmention.ReceiverOption {
