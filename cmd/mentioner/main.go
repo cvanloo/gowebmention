@@ -107,16 +107,12 @@ type (
 	}
 )
 
-func (u URL) MarshalJSON() ([]byte, error) {
-	return []byte("\"" + u.URL.String() + "\""), nil
+func (u URL) MarshalText() ([]byte, error) {
+	return []byte(u.URL.String()), nil
 }
 
-func (u *URL) UnmarshalJSON(bs []byte) error {
-	if bs[0] != '"' || bs[len(bs)-1] != '"' {
-		return fmt.Errorf("malformed url value: %s: needs to be enclosed in quotes", string(bs))
-	}
-	s := string(bs[1 : len(bs)-1])
-	url, err := url.Parse(s)
+func (u *URL) UnmarshalText(bs []byte) error {
+	url, err := url.Parse(string(bs))
 	u.URL = url
 	return err
 }
