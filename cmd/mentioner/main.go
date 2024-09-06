@@ -48,6 +48,46 @@ func main() {
 	// sudo systemctl start mentioner.socket
 	// socat - UNIX-CONNECT:/var/run/mentioner.socket
 
+	// @note: os.Exit: defers are NOT run, it's okay here
+
+	if len(os.Args) < 2 {
+		fmt.Println(usage())
+		os.Exit(2)
+	}
+
+	if os.Args[1] == "demonize" {
+		demon()
+	} else {
+		source := os.Args[1]
+		sourceURL, err := url.Parse(source)
+		if err != nil {
+			fmt.Printf("%v\n", err)
+			os.Exit(1)
+		}
+		targets := os.Args[2:]
+		targetURLs := make([]*url.URL, len(targets))
+		for i := range targets {
+			url, err := url.Parse(targets[i])
+			if err != nil {
+				fmt.Printf("%v\n", err)
+				os.Exit(1)
+			}
+			targetURLs[i] = url
+		}
+		if err := sender.MentionMany(sourceURL, targetURLs); err != nil {
+			fmt.Printf("%v\n", err)
+			os.Exit(1)
+		}
+	}
+}
+
+func usage() string {
+	app := os.Args[0]
+	return fmt.Sprintf(`%[1]s demonize                   -- Run as demon
+%[1]s source target [targets...] -- Send webmentions from source to target`, app)
+}
+
+func demon() {
 	fd := os.NewFile(3, "mentioner.socket")
 	listener, err := net.FileListener(fd)
 	if err != nil {
