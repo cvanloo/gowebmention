@@ -13,6 +13,7 @@
 //   - SHUTDOWN_TIMEOUT=Seconds: How long to wait for a clean shutdown after SIGINT or SIGTERM (default 20)
 //   - ENDPOINT=URL Path: On which path to listen for Webmentions (default /api/webmention)
 //   - LISTEN_ADDR=Domain with Port: Bind listener to this domain:port (default :8080)
+//   - ACCEPT_DOMAIN=Domain: Accept mentions if they point to this domain (e.g., the domain of your blog, required, no default)
 //   - NOTIFY_BY_MAIL=external, internal or no: Whether or not to enable notifications by mail (default no)
 //                    extarnl: use an external smtp server
 //                    internal: use builtin smtp
@@ -80,12 +81,27 @@ var (
 	shutdownTimeout = defaultShutdownTimeout
 	endpoint = defaultEndpoint
 	listenAddr = defaultListenAddr
+	acceptForDomain *url.URL
 	notifyByMail = defaultNotifyByMail
 )
 
 func loadConfig() {
 	if err := godotenv.Load(); err != nil {
 		_ = godotenv.Load("/etc/webmention/mentioner.env") // ignore error, use defaults
+	}
+
+	if acceptForDomainStr := os.Getenv("ACCEPT_DOMAIN"); acceptForDomainStr != "" {
+		var err error
+		acceptForDomain, err = url.Parse(acceptForDomainStr)
+		if err != nil {
+			slog.Error(err.Error())
+			// @todo: never exit on config failure
+			os.Exit(ExitConfigError)
+		}
+	} else {
+			slog.Error("missing config value ACCEPT_DOMAIN")
+			// @todo: never exit on config failure
+			os.Exit(ExitConfigError)
 	}
 
 	shutdownTimeout = defaultShutdownTimeout
@@ -124,7 +140,8 @@ appLoop:
 
 		receiver := webmention.NewReceiver(
 			webmention.WithAcceptsFunc(func(source, target *url.URL) bool {
-				return true
+				// @todo: as default value use same as listen addr
+				return target.Scheme == acceptForDomain.Scheme && target.Host == acceptForDomain.Host
 			}),
 			webmention.WithNotifier(webmention.NotifierFunc(func(mention webmention.Mention) {
 				slog.Info("received webmention",
