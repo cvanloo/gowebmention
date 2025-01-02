@@ -313,6 +313,7 @@ func (receiver *Receiver) processMention(mention Mention) error {
 	}
 
 	// Processing should be idempotent
+	slog.Info(fmt.Sprintf("sending to %d notifiers", len(receiver.notifiers)))
 	for _, notifier := range receiver.notifiers {
 		notifier.Receive(mention)
 	}

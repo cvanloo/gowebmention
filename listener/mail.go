@@ -80,6 +80,7 @@ func (m MailerExternalSmtp) Receive(mention webmention.Mention) {
 
 // Receive implements webmention.Notifier
 func (m MailerInternalSmtp) Receive(mention webmention.Mention) {
+	slog.Info("received mention, sending mail now...")
 	msg := gomail.NewMessage()
 	msg.SetHeader("From", m.Sender)
 	msg.SetHeader("To", m.Receiver)
@@ -92,20 +93,23 @@ func (m MailerInternalSmtp) Receive(mention webmention.Mention) {
 		return
 	}
 	if m.UseDkim {
+		slog.Info("sending email using dkim")
 		var signedMessage bytes.Buffer
 		if err := dkim.Sign(&signedMessage, &message, &m.DkimSignOpts); err != nil {
 			slog.Error(fmt.Sprintf("NotifyByMail: failed to sign mail: %s", err), "mention", mention)
 			return
 		}
+		slog.Info("message signed")
 		if err := smtp.SendMail(m.Addr, nil, m.Sender, []string{m.Receiver}, signedMessage.Bytes()); err != nil {
 			slog.Error(fmt.Sprintf("NotifyByMail: failed to send mail: %s", err), "mention", mention)
 			return
 		}
 	} else {
+		slog.Info("sending email without dkim")
 		if err := smtp.SendMail(m.Addr, nil, m.Sender, []string{m.Receiver}, message.Bytes()); err != nil {
 			slog.Error(fmt.Sprintf("NotifyByMail: failed to send mail: %s", err), "mention", mention)
 			return
 		}
 	}
-	slog.Error("email sent", "mention", mention)
+	slog.Info("email sent", "mention", mention)
 }
