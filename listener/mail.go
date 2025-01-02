@@ -107,4 +107,5 @@ func (m MailerInternalSmtp) Receive(mention webmention.Mention) {
 			return
 		}
 	}
+	slog.Error("email sent", "mention", mention)
 }
