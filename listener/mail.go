@@ -29,10 +29,12 @@ func NewMailerExternal(dialer *gomail.Dialer, sender, receiver string) MailerExt
 	}
 }
 
-func NewMailerInternal(receiverAddr string, sender, receiver string, useDkim bool, dkimOptions dkim.SignOptions) MailerInternalSmtp {
+func NewMailerInternal(fromAddr, from, toAddr, to string, useDkim bool, dkimOpts *dkim.SignOptions) MailerInternalSmtp {
 	return MailerInternalSmtp{
-		Sender:   sender,
-		Receiver: receiver,
+		FromAddr: fromAddr,
+		From: from,
+		ToAddr: toAddr,
+		To: to,
 		SubjectLine: func(webmention.Mention) string {
 			return "A post of yours has been mentioned"
 		},
@@ -40,8 +42,7 @@ func NewMailerInternal(receiverAddr string, sender, receiver string, useDkim boo
 			return fmt.Sprintf("source: %s\ntarget: %s\nstatus: %s\n", mention.Source, mention.Target, mention.Status)
 		},
 		UseDkim: useDkim,
-		DkimSignOpts: dkimOptions,
-		Addr: receiverAddr,
+		DkimSignOpts: dkimOpts,
 	}
 }
 
@@ -56,12 +57,12 @@ type (
 		Body             func(webmention.Mention) string
 	}
 	MailerInternalSmtp struct {
-		Sender, Receiver string
+		FromAddr, ToAddr string
+		From, To string
 		SubjectLine      func(webmention.Mention) string
 		Body             func(webmention.Mention) string
 		UseDkim          bool
-		DkimSignOpts     dkim.SignOptions
-		Addr             string
+		DkimSignOpts     *dkim.SignOptions
 	}
 )
 
@@ -80,36 +81,61 @@ func (m MailerExternalSmtp) Receive(mention webmention.Mention) {
 
 // Receive implements webmention.Notifier
 func (m MailerInternalSmtp) Receive(mention webmention.Mention) {
-	slog.Info("received mention, sending mail now...")
+	if err := m.receive(mention); err != nil {
+		slog.Error("MailerInternalSmtp receive failed to send email", "error", err, "mention", mention)
+	} else {
+		slog.Info("MailerInternalSmtp email sent", "mention", mention)
+	}
+}
+
+// Receive implements webmention.Notifier
+func (m MailerInternalSmtp) receive(mention webmention.Mention) error {
 	msg := gomail.NewMessage()
-	msg.SetHeader("From", m.Sender)
-	msg.SetHeader("To", m.Receiver)
+	msg.SetHeader("From", m.From)
+	msg.SetHeader("To", m.To)
 	msg.SetHeader("Subject", m.SubjectLine(mention))
 	msg.SetBody("text/plain", m.Body(mention))
-	var message bytes.Buffer
-	_, err := msg.WriteTo(&message)
-	if err != nil {
-		slog.Error(fmt.Sprintf("NotifyByMail: failed to write mail contents: %s", err), "mention", mention)
-		return
+	var clearMessage, signedMessage bytes.Buffer
+	if _, err := msg.WriteTo(&clearMessage); err != nil {
+		return err
 	}
 	if m.UseDkim {
-		slog.Info("sending email using dkim")
-		var signedMessage bytes.Buffer
-		if err := dkim.Sign(&signedMessage, &message, &m.DkimSignOpts); err != nil {
-			slog.Error(fmt.Sprintf("NotifyByMail: failed to sign mail: %s", err), "mention", mention)
-			return
-		}
-		slog.Info("message signed")
-		if err := smtp.SendMail(m.Addr, nil, m.Sender, []string{m.Receiver}, signedMessage.Bytes()); err != nil {
-			slog.Error(fmt.Sprintf("NotifyByMail: failed to send mail: %s", err), "mention", mention)
-			return
-		}
-	} else {
-		slog.Info("sending email without dkim")
-		if err := smtp.SendMail(m.Addr, nil, m.Sender, []string{m.Receiver}, message.Bytes()); err != nil {
-			slog.Error(fmt.Sprintf("NotifyByMail: failed to send mail: %s", err), "mention", mention)
-			return
+		if err := dkim.Sign(&signedMessage, &clearMessage, m.DkimSignOpts); err != nil {
+			return err
 		}
 	}
-	slog.Info("email sent", "mention", mention)
+	c, err := smtp.Dial(m.ToAddr)
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+	if err := c.Hello(m.FromAddr); err != nil {
+		return err
+	}
+	if err := c.Mail(m.From); err != nil {
+		return err
+	}
+	if err := c.Rcpt(m.To); err != nil {
+		return err
+	}
+	w, err := c.Data()
+	if err != nil {
+		return err
+	}
+	if m.UseDkim {
+		if _, err := w.Write(signedMessage.Bytes()); err != nil {
+			return err
+		}
+	} else {
+		if _, err := w.Write(clearMessage.Bytes()); err != nil {
+			return err
+		}
+	}
+	if err := w.Close(); err != nil {
+		return err
+	}
+	if err := c.Quit(); err != nil {
+		return err
+	}
+	return nil
 }

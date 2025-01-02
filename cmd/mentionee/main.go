@@ -27,7 +27,8 @@
 // Required options for internal smpt server:
 //   - MAIL_FROM=Send emails from this email address
 //   - MAIL_TO=Send emails to this email address
-//   - MAIL_RECEIVER_ADDR=Domain of the receiving mail server
+//   - MAIL_FROM_ADDR=Domain from which to send mails
+//   - MAIL_TO_ADDR=Domain of the receiving mail server
 //   - MAIL_DKIM_PRIV=Path to private key: Path to private key used for dkim signing (default don't sign)
 //   - MAIL_DKIM_SELECTOR=Selector: DKIM selector (default is "default")
 //   - MAIL_DKIM_HOST=Domain on which the DKIM is configured
@@ -254,21 +255,27 @@ func configureMailer() webmention.ReceiverOption {
 		slog.Info("enabling email notifications (external smtp)")
 		return webmention.WithNotifier(mailer)
 	case "internal":
-		receiverAddr := os.Getenv("MAIL_RECEIVER_ADDR")
-		if receiverAddr == "" {
-			slog.Error("missing RECEIVER_ADDR")
+		toAddr := os.Getenv("MAIL_TO_ADDR")
+		if toAddr == "" {
+			slog.Error("missing MAIL_TO_ADDR")
 			os.Exit(ExitConfigError)
 			return nil
 		}
-		sendMailsFrom := os.Getenv("MAIL_FROM")
-		if sendMailsFrom == "" {
-			slog.Error("missing MAIL_FROM")
-			os.Exit(ExitConfigError)
-			return nil
-		}
-		sendMailsTo := os.Getenv("MAIL_TO")
-		if sendMailsTo == "" {
+		to := os.Getenv("MAIL_TO")
+		if to == "" {
 			slog.Error("missing MAIL_TO")
+			os.Exit(ExitConfigError)
+			return nil
+		}
+		fromAddr := os.Getenv("MAIL_FROM_ADDR")
+		if fromAddr == "" {
+			slog.Error("missing MAIL_FROM_ADDR")
+			os.Exit(ExitConfigError)
+			return nil
+		}
+		from := os.Getenv("MAIL_FROM")
+		if from == "" {
+			slog.Error("missing MAIL_FROM")
 			os.Exit(ExitConfigError)
 			return nil
 		}
@@ -280,7 +287,7 @@ func configureMailer() webmention.ReceiverOption {
 		}
 		var (
 			useDkim bool
-			dkimSignOpts dkim.SignOptions
+			dkimSignOpts *dkim.SignOptions
 		)
 		dkimPrivPath := os.Getenv("MAIL_DKIM_PRIV")
 		if dkimPrivPath != "" {
@@ -311,14 +318,14 @@ func configureMailer() webmention.ReceiverOption {
 			if selector == "" {
 				selector = "default"
 			}
-			dkimSignOpts = dkim.SignOptions{
+			dkimSignOpts = &dkim.SignOptions{
 				Domain: host,
 				Selector: selector,
 				Signer: pk,
 			}
 			useDkim = true
 		}
-		mailer := listener.NewMailerInternal(receiverAddr, sendMailsFrom, sendMailsTo, useDkim, dkimSignOpts)
+		mailer := listener.NewMailerInternal(fromAddr, from, toAddr, to, useDkim, dkimSignOpts)
 		slog.Info("enabling email notifications (internal smtp)")
 		return webmention.WithNotifier(mailer)
 	default:
