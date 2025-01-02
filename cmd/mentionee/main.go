@@ -13,14 +13,23 @@
 //   - SHUTDOWN_TIMEOUT=Seconds: How long to wait for a clean shutdown after SIGINT or SIGTERM (default 20)
 //   - ENDPOINT=URL Path: On which path to listen for Webmentions (default /api/webmention)
 //   - LISTEN_ADDR=Domain with Port: Bind listener to this domain:port (default :8080)
-//   - NOTIFY_BY_MAIL=yes or no: Whether or not to enable notifications by mail (default no)
+//   - NOTIFY_BY_MAIL=external, internal or no: Whether or not to enable notifications by mail (default no)
+//                    extarnl: use an external smtp server
+//                    internal: use builtin smtp
+// Required options for external smtp server:
 //   - MAIL_HOST=Domain: Domain of the outgoing mail server (no default, required by NOTIFY_BY_MAIL)
 //   - MAIL_PORT=Port: Port of the outgoing mail server (no default, required by NOTIFY_BY_MAIL)
 //   - MAIL_USER=Username: User to authenticate to the outgoing mail server (no default, required by NOTIFY_BY_MAIL)
 //   - MAIL_PASS=Password: Password to authenticate to the outgoing mail server (no default, required by NOTIFY_BY_MAIL)
 //   - MAIL_FROM=E-Mail address: Address used in the FROM header (default same as MAIL_USER)
 //   - MAIL_TO=E-Mail address: Address used in the TO header (default same as MAIL_FROM or MAIL_USER)
-//   - NOTIFY_BY_MATRIX=yes or no: Whether or not to enable notifications by a Matrix bot (default no)
+// Required options for internal smpt server:
+//   - MAIL_FROM=Send emails from this email address
+//   - MAIL_TO=Send emails to this email address
+//   - MAIL_RECEIVER_ADDR=Domain of the receiving mail server
+//   - MAIL_DKIM_PRIV=Path to private key: Path to private key used for dkim signing (default don't sign)
+//   - MAIL_DKIM_SELECTOR=Selector: DKIM selector (default is "default")
+//   - MAIL_DKIM_HOST=Domain on which the DKIM is configured
 //
 // Configuration is reloaded on SIGHUP.
 package main
@@ -38,10 +47,14 @@ import (
 	"syscall"
 	"time"
 	"strconv"
+	"crypto/x509"
+	"crypto/rsa"
+	"encoding/pem"
 
-	"maunium.net/go/mautrix"
 	"gopkg.in/gomail.v2"
 	"github.com/joho/godotenv"
+	"github.com/emersion/go-msgauth/dkim"
+
 	webmention "github.com/cvanloo/gowebmention"
 	"github.com/cvanloo/gowebmention/listener"
 )
@@ -60,8 +73,7 @@ const (
 	defaultShutdownTimeout = 20 * time.Second
 	defaultEndpoint = "/api/webmention"
 	defaultListenAddr = ":8080"
-	defaultNotifyByMail = false
-	defaultNotifyByMatrix = false
+	defaultNotifyByMail = "no"
 )
 
 var (
@@ -69,7 +81,6 @@ var (
 	endpoint = defaultEndpoint
 	listenAddr = defaultListenAddr
 	notifyByMail = defaultNotifyByMail
-	notifyByMatrix = defaultNotifyByMatrix
 )
 
 func loadConfig() {
@@ -96,12 +107,7 @@ func loadConfig() {
 
 	notifyByMail = defaultNotifyByMail
 	if notifyByMailStr := os.Getenv("NOTIFY_BY_MAIL"); notifyByMailStr != "" {
-		notifyByMail = wordToBool(notifyByMailStr)
-	}
-
-	notifyByMatrix = defaultNotifyByMatrix
-	if notifyByMatrixStr := os.Getenv("NOTIFY_BY_MATRIX"); notifyByMatrixStr != "" {
-		notifyByMatrix = wordToBool(notifyByMatrixStr)
+		notifyByMail = notifyByMailStr
 	}
 }
 
@@ -127,8 +133,7 @@ appLoop:
 					"status", mention.Status,
 				)
 			})),
-			configureOrNil(notifyByMail, configureMailer),
-			configureOrNil(notifyByMatrix, configureMatrix),
+			configureOrNil(notifyByMail != "no", configureMailer),
 		)
 
 		go receiver.ProcessMentions()
@@ -192,69 +197,116 @@ func configureOrNil(shouldConfigure bool, option func() webmention.ReceiverOptio
 }
 
 func configureMailer() webmention.ReceiverOption {
-	portStr := os.Getenv("MAIL_PORT")
-	port, err := strconv.Atoi(portStr)
-	if err != nil {
-		slog.Error("invalid or missing mail port", "port", portStr)
+	switch notifyByMail {
+	case "external":
+		host := os.Getenv("MAIL_HOST")
+		if host == "" {
+			slog.Error("missing mail host")
+			os.Exit(ExitConfigError)
+			return nil
+		}
+		user := os.Getenv("MAIL_USER")
+		if user == "" {
+			slog.Error("missing mail user")
+			os.Exit(ExitConfigError)
+			return nil
+		}
+		sendMailsFrom := os.Getenv("MAIL_FROM")
+		if sendMailsFrom == "" {
+			sendMailsFrom = user
+		}
+		sendMailsTo := os.Getenv("MAIL_TO")
+		if sendMailsTo == "" {
+			sendMailsTo = sendMailsFrom
+		}
+		portStr := os.Getenv("MAIL_PORT")
+		port, err := strconv.Atoi(portStr)
+		if err != nil {
+			slog.Error("invalid or missing mail port", "port", portStr)
+			os.Exit(ExitConfigError)
+			return nil
+		}
+		pass := os.Getenv("MAIL_PASS")
+		if pass == "" {
+			slog.Error("missing mail pass")
+			os.Exit(ExitConfigError)
+			return nil
+		}
+		dialer := gomail.NewDialer(host, port, user, pass)
+		mailer := listener.NewMailerExternal(dialer, sendMailsFrom, sendMailsTo)
+		slog.Info("enabling email notifications (external smtp)")
+		return webmention.WithNotifier(mailer)
+	case "internal":
+		receiverAddr := os.Getenv("MAIL_RECEIVER_ADDR")
+		if receiverAddr == "" {
+			slog.Error("missing RECEIVER_ADDR")
+			os.Exit(ExitConfigError)
+			return nil
+		}
+		sendMailsFrom := os.Getenv("MAIL_FROM")
+		if sendMailsFrom == "" {
+			slog.Error("missing MAIL_FROM")
+			os.Exit(ExitConfigError)
+			return nil
+		}
+		sendMailsTo := os.Getenv("MAIL_TO")
+		if sendMailsTo == "" {
+			slog.Error("missing MAIL_TO")
+			os.Exit(ExitConfigError)
+			return nil
+		}
+		host := os.Getenv("MAIL_DKIM_HOST")
+		if host == "" {
+			slog.Error("missing MAIL_DKIM_HOST")
+			os.Exit(ExitConfigError)
+			return nil
+		}
+		var (
+			useDkim bool
+			dkimSignOpts dkim.SignOptions
+		)
+		dkimPrivPath := os.Getenv("MAIL_DKIM_PRIV")
+		if dkimPrivPath != "" {
+			pkbs, err := os.ReadFile(dkimPrivPath)
+			if err != nil {
+				slog.Error(err.Error())
+				os.Exit(ExitConfigError)
+			}
+			block, _ := pem.Decode(pkbs)
+			if block == nil {
+				slog.Error("failed to decode PEM block containing private key")
+				os.Exit(ExitConfigError)
+				return nil
+			}
+			key, err := x509.ParsePKCS8PrivateKey(block.Bytes)
+			if err != nil {
+				slog.Error(err.Error())
+				os.Exit(ExitConfigError)
+				return nil
+			}
+			pk, ok := key.(*rsa.PrivateKey)
+			if !ok {
+				slog.Error("not an rsa private key")
+				os.Exit(ExitConfigError)
+				return nil
+			}
+			selector := os.Getenv("MAIL_DKIM_SELECTOR")
+			if selector == "" {
+				selector = "default"
+			}
+			dkimSignOpts = dkim.SignOptions{
+				Domain: host,
+				Selector: selector,
+				Signer: pk,
+			}
+			useDkim = true
+		}
+		mailer := listener.NewMailerInternal(receiverAddr, sendMailsFrom, sendMailsTo, useDkim, dkimSignOpts)
+		slog.Info("enabling email notifications (internal smtp)")
+		return webmention.WithNotifier(mailer)
+	default:
+		slog.Error("invalid option for NOTIFY_BY_MAIL", "value", notifyByMail)
 		os.Exit(ExitConfigError)
-		return nil
 	}
-	host := os.Getenv("MAIL_HOST")
-	if host == "" {
-		slog.Error("missing mail host")
-		os.Exit(ExitConfigError)
-		return nil
-	}
-	user := os.Getenv("MAIL_USER")
-	if user == "" {
-		slog.Error("missing mail user")
-		os.Exit(ExitConfigError)
-		return nil
-	}
-	pass := os.Getenv("MAIL_PASS")
-	if pass == "" {
-		slog.Error("missing mail pass")
-		os.Exit(ExitConfigError)
-		return nil
-	}
-	sendMailsFrom := os.Getenv("MAIL_FROM")
-	if sendMailsFrom == "" {
-		sendMailsFrom = user
-	}
-	sendMailsTo := os.Getenv("MAIL_TO")
-	if sendMailsTo == "" {
-		sendMailsTo = sendMailsFrom
-	}
-	dialer := gomail.NewDialer(host, port, user, pass)
-	mailer := listener.NewMailer(dialer, sendMailsFrom, sendMailsTo)
-	slog.Info("enabling email notifications")
-	return webmention.WithNotifier(mailer)
-}
-
-func configureMatrix() webmention.ReceiverOption {
-	client, err := mautrix.NewClient("http://192.168.1.233:8008/", "@testikus@192.168.1.233", "")
-	if err != nil {
-		panic(err)
-	}
-	respLogin, err := client.Login(context.Background(), &mautrix.ReqLogin{
-		Type: mautrix.AuthTypePassword,
-		Identifier: mautrix.UserIdentifier{
-			Type: "m.id.user",
-			User: "testikus",
-		},
-		Password: "testtest",
-		StoreCredentials: true,
-	})
-	slog.Info("login homeserver", "resp", respLogin)
-	if err != nil {
-		panic(err)
-	}
-	respJoin, err := client.JoinRoom(context.Background(), "!vY4xbK99YKwMwZ9H:localhost", "http://192.168.1.233:8008/", nil)
-	slog.Info("join room", "resp", respJoin)
-	if err != nil {
-		panic(err)
-	}
-	bot := listener.NewMatrixBot(client, "!vY4xbK99YKwMwZ9H:localhost")
-	slog.Info("enabling matrix notifications")
-	return webmention.WithNotifier(bot)
+	return nil
 }
