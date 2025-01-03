@@ -1,4 +1,3 @@
-// Package webmention implements the receiving end of webmentions. 
 package webmention
 
 import (
@@ -104,7 +103,7 @@ const (
 	StatusDeleted        = "source itself got deleted"
 )
 
-// Report may be reassigned to handle 'unhandled' errors
+// Report may be reassigned to handle 'unhandled' errors related to mention.
 var Report = func(err error, mention Mention) {
 }
 
@@ -127,8 +126,8 @@ func NewReceiver(opts ...ReceiverOption) *Receiver {
 		cacheTimeout: 3*time.Hour,
 	}
 	receiver.mediaHandler = mediaRegister{
-		{name: "text/html", qweight: 1.0, handler: receiver.HtmlHandler},
-		{name: "text/plain", qweight: 0.1, handler: receiver.PlainHandler},
+		{name: "text/html", qweight: 1.0, handler: HtmlHandler},
+		{name: "text/plain", qweight: 0.1, handler: PlainHandler},
 	}
 	for _, opt := range opts {
 		if opt != nil {
@@ -405,7 +404,7 @@ func (receiver *Receiver) processMention(mention Mention) error {
 	return nil
 }
 
-func (receiver *Receiver) PlainHandler(content io.Reader, target URL) (status Status, err error) {
+func PlainHandler(content io.Reader, target URL) (status Status, err error) {
 	bs, err := io.ReadAll(content)
 	if err != nil {
 		return status, err
@@ -416,7 +415,7 @@ func (receiver *Receiver) PlainHandler(content io.Reader, target URL) (status St
 	return StatusLink, nil
 }
 
-func (receiver *Receiver) HtmlHandler(content io.Reader, target URL) (status Status, err error) {
+func HtmlHandler(content io.Reader, target URL) (status Status, err error) {
 	doc, err := html.Parse(content)
 	if err != nil {
 		return status, err
