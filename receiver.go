@@ -10,6 +10,8 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"strconv"
+	"slices"
 	mimelib "mime"
 )
 
@@ -22,8 +24,15 @@ type (
 		httpClient    *http.Client
 		shutdown      chan struct{}
 		targetAccepts TargetAcceptsFunc
-		mediaHandler  map[string]MediaHandler // @todo: [:priority:]
+		mediaHandler  mediaRegister
 		userAgent     string
+	}
+
+	mediaRegister []mediaHandler
+	mediaHandler struct {
+		name    string
+		handler MediaHandler
+		qweight float64
 	}
 
 	// A MediaHandler searches sourceData for the target link.
@@ -53,6 +62,30 @@ type (
 	// NotifierFunc adapts a function to an object that implements the Notifier interface.
 	NotifierFunc func(mention Mention)
 )
+
+func (mr mediaRegister) Get(mime string) (MediaHandler, bool) {
+	for _, h := range mr {
+		if h.name == mime {
+			return h.handler, true
+		}
+	}
+	return nil, false
+}
+
+func (mr mediaRegister) String() string {
+	var builder strings.Builder
+	for i, h := range mr {
+		if i > 0 {
+			builder.WriteString(",")
+		}
+		if h.qweight == 1 {
+			builder.WriteString(h.name)
+		} else {
+			builder.WriteString(fmt.Sprintf("%s;q=%s", h.name, strconv.FormatFloat(h.qweight, 'f', 3, 64)))
+		}
+	}
+	return builder.String()
+}
 
 const (
 	defaultRequestQueueSize = 100
@@ -84,9 +117,9 @@ func NewReceiver(opts ...ReceiverOption) *Receiver {
 		},
 		userAgent:  "Webmention (github.com/cvanloo/gowebmention)",
 	}
-	receiver.mediaHandler = map[string]MediaHandler{
-		"text/html":  receiver.HtmlHandler,
-		"text/plain": receiver.PlainHandler,
+	receiver.mediaHandler = mediaRegister{
+		{name: "text/html", qweight: 1.0, handler: receiver.HtmlHandler},
+		{name: "text/plain", qweight: 0.1, handler: receiver.PlainHandler},
 	}
 	for _, opt := range opts {
 		if opt != nil {
@@ -118,16 +151,25 @@ func WithAcceptsFunc(accepts TargetAcceptsFunc) ReceiverOption {
 // Register a handler for a certain media type.
 // If multiple handlers for the same type are registered, only the last handler will be considered.
 // The default handlers are:
-//   - text/plain: PlainHandler
-//   - text/html:  HtmlHandler
+//   - text/plain;q=1.0: PlainHandler
+//   - text/html;q=0.1:  HtmlHandler
 //
 // To remove any of the default handlers, pass a nil handler.
-func WithMediaHandler(mime string, handler MediaHandler) ReceiverOption {
+func WithMediaHandler(mime string, qweight float64, handler MediaHandler) ReceiverOption {
 	return func(r *Receiver) {
 		if handler == nil {
-			delete(r.mediaHandler, mime)
+			for i, h := range r.mediaHandler {
+				if h.name == mime {
+					r.mediaHandler = slices.Delete(r.mediaHandler, i, i+1)
+					break
+				}
+			}
 		} else {
-			r.mediaHandler[mime] = handler
+			r.mediaHandler = append(r.mediaHandler, mediaHandler{
+				name: mime,
+				qweight: qweight,
+				handler: handler,
+			})
 		}
 	}
 }
@@ -273,9 +315,7 @@ func (receiver *Receiver) processMention(mention Mention) error {
 			return err
 		}
 		req.Header.Set("User-Agent", receiver.userAgent)
-		for mime := range receiver.mediaHandler { // @todo: [:priority:]
-			req.Header.Add("Accept", mime)
-		}
+		req.Header.Set("Accept", receiver.mediaHandler.String())
 		resp, err := receiver.httpClient.Do(req)
 		if err != nil {
 			log.Error(err.Error())
@@ -304,7 +344,7 @@ func (receiver *Receiver) processMention(mention Mention) error {
 	}
 
 	{
-		mediaHandler, hasHandler := receiver.mediaHandler[mime]
+		mediaHandler, hasHandler := receiver.mediaHandler.Get(mime)
 		if !hasHandler {
 			log.Error("no mime handler registered", "mime", mime)
 			return fmt.Errorf("no mime handler registered for: %s", mime)
