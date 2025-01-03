@@ -266,9 +266,8 @@ func (receiver *Receiver) handle(w http.ResponseWriter, r *http.Request) error {
 		if time.Now().Sub(t) < receiver.cacheTimeout {
 			return TooManyRequests()
 		}
-	} else {
-		receiver.mentionCache[mentionCacheEntry{source: sourceURL.String(), target: targetURL.String()}] = time.Now()
 	}
+	receiver.mentionCache[mentionCacheEntry{source: sourceURL.String(), target: targetURL.String()}] = time.Now()
 
 	select {
 	case receiver.enqueue <- Mention{sourceURL, targetURL, StatusNoLink}:
