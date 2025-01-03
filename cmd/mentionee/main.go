@@ -157,7 +157,7 @@ appLoop:
 		go receiver.ProcessMentions()
 
 		mux := &http.ServeMux{}
-		mux.HandleFunc(endpoint, receiver.WebmentionEndpoint)
+		mux.Handle(endpoint, receiver)
 
 		server := http.Server{
 			Addr:    listenAddr,

@@ -48,6 +48,7 @@ var _ WebMentionSender = (*Sender)(nil)
 
 func NewSender(opts ...SenderOption) *Sender {
 	sender := &Sender{
+		// @todo: I think I forgot to actually use this...
 		UserAgent:  "Webmention (github.com/cvanloo/gowebmention)",
 		HttpClient: http.DefaultClient,
 	}

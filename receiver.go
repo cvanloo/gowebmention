@@ -1,3 +1,4 @@
+// Package webmention implements the receiving end of webmentions. 
 package webmention
 
 import (
@@ -13,6 +14,7 @@ import (
 )
 
 type (
+	// Receiver is a http.Handler that takes care of processing webmentions.
 	Receiver struct {
 		enqueue       chan<- Mention
 		dequeue       <-chan Mention
@@ -20,25 +22,33 @@ type (
 		httpClient    *http.Client
 		shutdown      chan struct{}
 		targetAccepts TargetAcceptsFunc
-		mediaHandler map[string]MediaHandler // @todo: [:priority:]
+		mediaHandler  map[string]MediaHandler // @todo: [:priority:]
+		userAgent     string
 	}
 
 	// A MediaHandler searches sourceData for the target link.
 	// Only if an exact match is found a status of StatusLink and a nil error must be returned.
 	// If no (exact) match is found, a status of StatusNoLink and a nil error must be returned.
 	// If error is non-nil, it is treated as an internal error and the value of status is ignored.
-	// Generally, on error, no listeners will be invoked.
+	// On error, no listeners will be invoked.
 	MediaHandler    func(sourceData io.Reader, target URL) (Status, error)
 	ReceiverOption  func(*Receiver)
 	Mention struct {
 		Source, Target URL
-		Status         Status // @todo: add: Details map[string]???
+		Status         Status
 	}
+	Status string
 	TargetAcceptsFunc func(source, target URL) bool
-	Notifier          interface {
+
+	// A registered Notifier is informed of any valid webmentions.
+	// This can be used to implement your own notifiers, e.g., to send a message on Discord, or XMPP.
+	// The Status field of the mention needs to be checked:
+	//   - StatusLink: the source (still, or newly) links to target
+	//   - StatusNoLink: the source does not (anymore) link to target
+	//   - StatusDeleted: the source got deleted
+	Notifier interface {
 		Receive(mention Mention)
 	}
-	Status string // @todo: not good that user defined handlers should only return two out of the three defined values
 
 	// NotifierFunc adapts a function to an object that implements the Notifier interface.
 	NotifierFunc func(mention Mention)
@@ -54,10 +64,8 @@ const (
 	StatusDeleted        = "source itself got deleted"
 )
 
-var Report = report
-
-func report(err error, mention Mention) {
-	// do nothing
+// Report may be reassigned to handle 'unhandled' errors
+var Report = func(err error, mention Mention) {
 }
 
 func (f NotifierFunc) Receive(mention Mention) {
@@ -74,6 +82,7 @@ func NewReceiver(opts ...ReceiverOption) *Receiver {
 		targetAccepts: func(URL, URL) bool {
 			return false
 		},
+		userAgent:  "Webmention (github.com/cvanloo/gowebmention)",
 	}
 	receiver.mediaHandler = map[string]MediaHandler{
 		"text/html":  receiver.HtmlHandler,
@@ -85,6 +94,13 @@ func NewReceiver(opts ...ReceiverOption) *Receiver {
 		}
 	}
 	return receiver
+}
+
+// WithFetchUserAgent configures the user agent to be used when fetching a mention's source.
+func WithFetchUserAgent(agent string) ReceiverOption {
+	return func(r *Receiver) {
+		r.userAgent = agent
+	}
 }
 
 func WithNotifier(notifiers ...Notifier) ReceiverOption {
@@ -116,6 +132,9 @@ func WithMediaHandler(mime string, handler MediaHandler) ReceiverOption {
 	}
 }
 
+// Configure size of the request queue.
+// The server will start returning http.StatusTooManyRequests when the request
+// queue is full.
 func WithQueueSize(size int) ReceiverOption {
 	return func(r *Receiver) {
 		queue := make(chan Mention, size)
@@ -124,11 +143,10 @@ func WithQueueSize(size int) ReceiverOption {
 	}
 }
 
-func (receiver *Receiver) WebmentionEndpoint(w http.ResponseWriter, r *http.Request) {
-	if err := receiver.Handle(w, r); err != nil {
+func (receiver *Receiver) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if err := receiver.handle(w, r); err != nil {
 		if err, ok := err.(ErrorResponder); ok {
 			if err.RespondError(w, r) {
-				// @todo: log request either way as Info
 				return
 			}
 		}
@@ -137,7 +155,7 @@ func (receiver *Receiver) WebmentionEndpoint(w http.ResponseWriter, r *http.Requ
 	}
 }
 
-func (receiver *Receiver) Handle(w http.ResponseWriter, r *http.Request) error {
+func (receiver *Receiver) handle(w http.ResponseWriter, r *http.Request) error {
 	if r.Method != http.MethodPost {
 		return MethodNotAllowed()
 	}
@@ -183,7 +201,7 @@ func (receiver *Receiver) Handle(w http.ResponseWriter, r *http.Request) error {
 	}
 
 	if !receiver.targetAccepts(sourceURL, targetURL) {
-		return BadRequest("target does not accept webmentions")
+		return BadRequest("target does not accept webmentions from this source")
 	}
 
 	select {
@@ -201,6 +219,7 @@ func (receiver *Receiver) Handle(w http.ResponseWriter, r *http.Request) error {
 
 // ProcessMentions does not return until stopped by calling Shutdown.
 // It is intended to run this function in its own goroutine.
+// You may start multiple goroutines all running this function.
 func (receiver *Receiver) ProcessMentions() {
 	// process queue until a shutdown is issued
 	for {
@@ -208,7 +227,6 @@ func (receiver *Receiver) ProcessMentions() {
 		case <-receiver.shutdown:
 			return
 		case mention, ok := <-receiver.dequeue:
-			slog.Info("received mention", "mention", mention)
 			if !ok {
 				return
 			}
@@ -218,10 +236,8 @@ func (receiver *Receiver) ProcessMentions() {
 }
 
 // Shutdown causes the webmention service to stop accepting any new mentions.
-// Mentions currently waiting in the request queue will still be processed,
-// until ctx expires.
-// The http server (or whatever is invoking WebmentionEndpoint) must be stopped
-// first, WebmentionEndpoint will panic otherwise.
+// Mentions currently waiting in the request queue will still be processed, until ctx expires.
+// The http server must be stopped first, ServeHTTP will panic otherwise.
 func (receiver *Receiver) Shutdown(ctx context.Context) {
 	// Finish processing queue until it is emptied or the shutdown context has expired.
 	// Whichever happens first.
@@ -256,6 +272,7 @@ func (receiver *Receiver) processMention(mention Mention) error {
 			log.Error(err.Error())
 			return err
 		}
+		req.Header.Set("User-Agent", receiver.userAgent)
 		for mime := range receiver.mediaHandler { // @todo: [:priority:]
 			req.Header.Add("Accept", mime)
 		}
@@ -268,16 +285,17 @@ func (receiver *Receiver) processMention(mention Mention) error {
 			mention.Status = StatusDeleted
 			// Processing should be idempotent
 			for _, notifier := range receiver.notifiers {
-				notifier.Receive(mention)
+				go notifier.Receive(mention)
 			}
-			return err
+			return nil
 		}
 		if resp.StatusCode < 200 || resp.StatusCode > 300 {
 			err = ErrSourceNotFound
 			log.Error(err.Error())
 			return err
 		}
-		mediaType, _, err := mimelib.ParseMediaType(resp.Header.Get("Content-Type"))
+		contentHeader := resp.Header.Get("Content-Type")
+		mediaType, _, err := mimelib.ParseMediaType(contentHeader)
 		if err != nil {
 			log.Error(err.Error(), "media_types", resp.Header.Get("Content-Type"))
 			return err
@@ -286,7 +304,7 @@ func (receiver *Receiver) processMention(mention Mention) error {
 	}
 
 	{
-		handler, hasHandler := receiver.mediaHandler[mime]
+		mediaHandler, hasHandler := receiver.mediaHandler[mime]
 		if !hasHandler {
 			log.Error("no mime handler registered", "mime", mime)
 			return fmt.Errorf("no mime handler registered for: %s", mime)
@@ -297,6 +315,7 @@ func (receiver *Receiver) processMention(mention Mention) error {
 			log.Error(err.Error())
 			return err
 		}
+		req.Header.Set("User-Agent", receiver.userAgent)
 		req.Header.Set("Accept", mime)
 		resp, err := receiver.httpClient.Do(req)
 		if err != nil {
@@ -304,7 +323,7 @@ func (receiver *Receiver) processMention(mention Mention) error {
 			return err
 		}
 
-		handlerStatus, err := handler(resp.Body, mention.Target)
+		handlerStatus, err := mediaHandler(resp.Body, mention.Target)
 		if err != nil {
 			log.Error(err.Error())
 			return err
@@ -334,7 +353,7 @@ func (receiver *Receiver) PlainHandler(content io.Reader, target URL) (status St
 
 func (receiver *Receiver) HtmlHandler(content io.Reader, target URL) (status Status, err error) {
 	doc, err := html.Parse(content)
-	if err != nil { // @todo: be a bit fault tolerant in parsing html? like browsers are
+	if err != nil {
 		return status, err
 	}
 

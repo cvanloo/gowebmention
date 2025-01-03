@@ -10,8 +10,48 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"sync"
+	"log"
+	"context"
+	"time"
 	webmention "github.com/cvanloo/gowebmention"
 )
+
+func ExampleReceiver() {
+	acceptForTargetUrl  := must(url.Parse("https://example.com"))
+	webmentionee := webmention.NewReceiver(
+		webmention.WithAcceptsFunc(func(source, target *url.URL) bool {
+			return acceptForTargetUrl.Scheme == target.Scheme && acceptForTargetUrl.Host == target.Host
+		}),
+		webmention.WithNotifier(webmention.NotifierFunc(func(mention webmention.Mention) {
+			fmt.Printf("received webmention from %s for %s, status %s", mention.Source, mention.Target, mention.Status)
+		})),
+	)
+	mux := &http.ServeMux{}
+	mux.Handle("/api/webmention", webmentionee)
+	srv := http.Server{
+		Addr: ":8080",
+		Handler: mux,
+	}
+
+	// [!] should be started before http handler starts receiving
+	// [!] You can start as many processing goroutines as you'd like
+	go webmentionee.ProcessMentions()
+	go func() {
+		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Printf("http server error: %v", err)
+		}
+	}()
+
+	// [!] Once it's time for shutdown...
+	shutdownCtx, release := context.WithTimeout(context.Background(), 20*time.Second)
+	defer release()
+	srv.SetKeepAlivesEnabled(false)
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		log.Printf("http shutdown error: %v", err)
+	}
+	// [!] shut down the receiver only after http endpoint stopped
+	webmentionee.Shutdown(shutdownCtx)
+}
 
 func accepts(source, target *url.URL) bool {
 	switch target.Path {
@@ -121,7 +161,7 @@ func TestReceiveLocal(t *testing.T) {
 	go receiver.ProcessMentions()
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("/webmention", receiver.WebmentionEndpoint)
+	mux.Handle("/webmention", receiver)
 
 	for i, testCase := range TestCases {
 		mux.HandleFunc(fmt.Sprintf("/source/%d", i+1), testCase.SourceHandler(&ts))

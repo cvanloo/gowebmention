@@ -144,6 +144,10 @@ func must[T any](t T, e error) T {
 }
 
 func TestEndpointDiscoveryRocks(t *testing.T) {
+	if testing.Short() {
+		t.SkipNow()
+	}
+
 	sender := webmention.NewSender()
 
 	for _, target := range targets {
@@ -160,6 +164,10 @@ func TestEndpointDiscoveryRocks(t *testing.T) {
 }
 
 func TestMentioningRocks(t *testing.T) {
+	if testing.Short() {
+		t.SkipNow()
+	}
+
 	sender := webmention.NewSender()
 
 	source := must(url.Parse("http://blog.vanloo.ch/test/webmention.html"))
