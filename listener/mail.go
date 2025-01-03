@@ -6,103 +6,113 @@ import (
 	"log/slog"
 	"bytes"
 	"net/smtp"
+	"sync"
+	"time"
+	"strings"
 
 	"github.com/emersion/go-msgauth/dkim"
 
 	webmention "github.com/cvanloo/gowebmention"
 )
 
-// Configure a mailer.
-// The SubjectLine and Body properties of the Mailer may be modified to
-// generate custom email subjects and contents, when notifying about Webmentions.
-func NewMailerExternal(dialer *gomail.Dialer, sender, receiver string) MailerExternalSmtp {
-	return MailerExternalSmtp{
-		Sender:   sender,
-		Receiver: receiver,
-		Dialer:   dialer,
-		SubjectLine: func(webmention.Mention) string {
-			return "A post of yours has been mentioned"
-		},
-		Body: func(mention webmention.Mention) string {
-			return fmt.Sprintf("source: %s\ntarget: %s\nstatus: %s\n", mention.Source, mention.Target, mention.Status)
-		},
-	}
-}
-
-func NewMailerInternal(fromAddr, from, toAddr, to string, useDkim bool, dkimOpts *dkim.SignOptions) MailerInternalSmtp {
-	return MailerInternalSmtp{
-		FromAddr: fromAddr,
-		From: from,
-		ToAddr: toAddr,
-		To: to,
-		SubjectLine: func(webmention.Mention) string {
-			return "A post of yours has been mentioned"
-		},
-		Body: func(mention webmention.Mention) string {
-			return fmt.Sprintf("source: %s\ntarget: %s\nstatus: %s\n", mention.Source, mention.Target, mention.Status)
-		},
-		UseDkim: useDkim,
-		DkimSignOpts: dkimOpts,
-	}
-}
-
-// Mailer is a webmention.Notifier that -- whenever a mention is received --
-// sends an email notification from Sender to Receiver, with a subject line
-// produced by SubjectLine and the email body produced by Body.
 type (
-	MailerExternalSmtp struct {
-		Sender, Receiver string
-		Dialer           *gomail.Dialer
-		SubjectLine      func(webmention.Mention) string
-		Body             func(webmention.Mention) string
+	Mailer struct {
+		Sender Sender
 	}
-	MailerInternalSmtp struct {
+	Sender interface {
+		Send([]webmention.Mention) error
+	}
+	ReportAggregator struct {
+		m              sync.Mutex
+		Todos          []webmention.Mention
+		SendAfterTime  time.Duration
+		lastSentTime   time.Time
+		SendAfterCount int
+		Sender         Sender
+	}
+	InternalMailer struct {
+		SubjectLine      func([]webmention.Mention) string
+		Body             func([]webmention.Mention) string
 		FromAddr, ToAddr string
-		From, To string
-		SubjectLine      func(webmention.Mention) string
-		Body             func(webmention.Mention) string
-		UseDkim          bool
+		From, To         string
+	}
+	InternalDKIMMailer struct {
+		InternalMailer
 		DkimSignOpts     *dkim.SignOptions
+	}
+	ExternalMailer struct {
+		SubjectLine func([]webmention.Mention) string
+		Body        func([]webmention.Mention) string
+		From, To    string
+		Dialer      *gomail.Dialer
 	}
 )
 
-// Receive implements webmention.Notifier
-func (m MailerExternalSmtp) Receive(mention webmention.Mention) {
-	msg := gomail.NewMessage()
-	msg.SetHeader("From", m.Sender)
-	msg.SetHeader("To", m.Receiver)
-	msg.SetHeader("Subject", m.SubjectLine(mention))
-	msg.SetBody("text/plain", m.Body(mention))
-	err := m.Dialer.DialAndSend(msg)
-	if err != nil {
-		slog.Error(fmt.Sprintf("NotifyByMail: failed to send email: %s", err), "mention", mention)
+func DefaultSubjectLine(mentions []webmention.Mention) string {
+	return fmt.Sprintf("You've received %d new mentions", len(mentions))
+}
+
+func DefaultBody(mentions []webmention.Mention) string {
+	var builder strings.Builder
+	for _, mention := range mentions {
+		builder.WriteString(fmt.Sprintf("source: %s\ntarget: %s\nstatus: %s\n\n", mention.Source, mention.Target, mention.Status))
+	}
+	return builder.String()
+}
+
+func NewMailer(sender Sender) Mailer {
+	return Mailer{Sender: sender}
+}
+
+func (m Mailer) Receive(mention webmention.Mention) {
+	if err := m.Sender.Send([]webmention.Mention{mention}); err != nil {
+		slog.Error(fmt.Sprintf("notifybymail: failed to send email: %s", err), "mention", mention)
 	}
 }
 
-// Receive implements webmention.Notifier
-func (m MailerInternalSmtp) Receive(mention webmention.Mention) {
-	if err := m.receive(mention); err != nil {
-		slog.Error("MailerInternalSmtp receive failed to send email", "error", err, "mention", mention)
-	} else {
-		slog.Info("MailerInternalSmtp email sent", "mention", mention)
+func (m *ReportAggregator) Start() {
+	for range time.Tick(m.SendAfterTime) {
+		if m.m.TryLock() {
+			m.SendNow()
+			m.m.Unlock()
+		}
 	}
 }
 
-// Receive implements webmention.Notifier
-func (m MailerInternalSmtp) receive(mention webmention.Mention) error {
+func (m *ReportAggregator) Send(mentions []webmention.Mention) error {
+	m.m.Lock()
+	defer m.m.Unlock()
+	m.Todos = append(m.Todos, mentions...)
+	switch {
+	case time.Now().Sub(m.lastSentTime) >= m.SendAfterTime:
+		fallthrough
+	case len(m.Todos) >= m.SendAfterCount:
+		return m.SendNow()
+	}
+	return nil
+}
+
+func (m *ReportAggregator) SendNow() error {
+	if len(m.Todos) <= 0 {
+		return nil // not an error, just do nothing
+	}
+	if err := m.Sender.Send(m.Todos); err != nil {
+		return err
+	}
+	m.Todos = nil
+	m.lastSentTime = time.Now()
+	return nil
+}
+
+func (m InternalMailer) Send(mentions []webmention.Mention) error {
 	msg := gomail.NewMessage()
 	msg.SetHeader("From", m.From)
 	msg.SetHeader("To", m.To)
-	msg.SetHeader("Subject", m.SubjectLine(mention))
-	msg.SetBody("text/plain", m.Body(mention))
-	var clearMessage, signedMessage bytes.Buffer
+	msg.SetHeader("Subject", m.SubjectLine(mentions))
+	msg.SetBody("text/plain", m.Body(mentions))
+	var clearMessage bytes.Buffer
 	if _, err := msg.WriteTo(&clearMessage); err != nil {
 		return err
-	}
-	if m.UseDkim {
-		if err := dkim.Sign(&signedMessage, &clearMessage, m.DkimSignOpts); err != nil {
-			return err
-		}
 	}
 	c, err := smtp.Dial(m.ToAddr)
 	if err != nil {
@@ -122,14 +132,8 @@ func (m MailerInternalSmtp) receive(mention webmention.Mention) error {
 	if err != nil {
 		return err
 	}
-	if m.UseDkim {
-		if _, err := w.Write(signedMessage.Bytes()); err != nil {
-			return err
-		}
-	} else {
-		if _, err := w.Write(clearMessage.Bytes()); err != nil {
-			return err
-		}
+	if _, err := w.Write(clearMessage.Bytes()); err != nil {
+		return err
 	}
 	if err := w.Close(); err != nil {
 		return err
@@ -138,4 +142,56 @@ func (m MailerInternalSmtp) receive(mention webmention.Mention) error {
 		return err
 	}
 	return nil
+}
+
+func (m InternalDKIMMailer) Send(mentions []webmention.Mention) error {
+	msg := gomail.NewMessage()
+	msg.SetHeader("From", m.From)
+	msg.SetHeader("To", m.To)
+	msg.SetHeader("Subject", m.SubjectLine(mentions))
+	msg.SetBody("text/plain", m.Body(mentions))
+	var clearMessage, signedMessage bytes.Buffer
+	if _, err := msg.WriteTo(&clearMessage); err != nil {
+		return err
+	}
+	if err := dkim.Sign(&signedMessage, &clearMessage, m.DkimSignOpts); err != nil {
+		return err
+	}
+	c, err := smtp.Dial(m.ToAddr)
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+	if err := c.Hello(m.FromAddr); err != nil {
+		return err
+	}
+	if err := c.Mail(m.From); err != nil {
+		return err
+	}
+	if err := c.Rcpt(m.To); err != nil {
+		return err
+	}
+	w, err := c.Data()
+	if err != nil {
+		return err
+	}
+	if _, err := w.Write(signedMessage.Bytes()); err != nil {
+		return err
+	}
+	if err := w.Close(); err != nil {
+		return err
+	}
+	if err := c.Quit(); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (m ExternalMailer) Send(mentions []webmention.Mention) error {
+	msg := gomail.NewMessage()
+	msg.SetHeader("From", m.From)
+	msg.SetHeader("To", m.To)
+	msg.SetHeader("Subject", m.SubjectLine(mentions))
+	msg.SetBody("text/plain", m.Body(mentions))
+	return m.Dialer.DialAndSend(msg)
 }

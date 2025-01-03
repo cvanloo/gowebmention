@@ -251,9 +251,21 @@ func configureMailer() webmention.ReceiverOption {
 			return nil
 		}
 		dialer := gomail.NewDialer(host, port, user, pass)
-		mailer := listener.NewMailerExternal(dialer, sendMailsFrom, sendMailsTo)
+		mailer := listener.ExternalMailer{
+			SubjectLine: listener.DefaultSubjectLine,
+			Body: listener.DefaultBody,
+			From: sendMailsFrom,
+			To: sendMailsTo,
+			Dialer: dialer,
+		}
+		aggregator := &listener.ReportAggregator{
+			SendAfterTime: 12*time.Hour,
+			SendAfterCount: 24,
+			Sender: mailer,
+		}
+		go aggregator.Start()
 		slog.Info("enabling email notifications (external smtp)")
-		return webmention.WithNotifier(mailer)
+		return webmention.WithNotifier(listener.Mailer{aggregator})
 	case "internal":
 		toAddr := os.Getenv("MAIL_TO_ADDR")
 		if toAddr == "" {
@@ -285,10 +297,16 @@ func configureMailer() webmention.ReceiverOption {
 			os.Exit(ExitConfigError)
 			return nil
 		}
-		var (
-			useDkim bool
-			dkimSignOpts *dkim.SignOptions
-		)
+		internalMailer := listener.InternalMailer{
+			SubjectLine: listener.DefaultSubjectLine,
+			Body: listener.DefaultBody,
+			FromAddr: fromAddr,
+			ToAddr: toAddr,
+			From: from,
+			To: to,
+		}
+		var sender listener.Sender
+		sender = internalMailer
 		dkimPrivPath := os.Getenv("MAIL_DKIM_PRIV")
 		if dkimPrivPath != "" {
 			pkbs, err := os.ReadFile(dkimPrivPath)
@@ -318,16 +336,24 @@ func configureMailer() webmention.ReceiverOption {
 			if selector == "" {
 				selector = "default"
 			}
-			dkimSignOpts = &dkim.SignOptions{
+			dkimSignOpts := &dkim.SignOptions{
 				Domain: host,
 				Selector: selector,
 				Signer: pk,
 			}
-			useDkim = true
+			sender = listener.InternalDKIMMailer{
+				InternalMailer: internalMailer,
+				DkimSignOpts: dkimSignOpts,
+			}
 		}
-		mailer := listener.NewMailerInternal(fromAddr, from, toAddr, to, useDkim, dkimSignOpts)
+		aggregator := &listener.ReportAggregator{
+			SendAfterTime: 12*time.Hour,
+			SendAfterCount: 24,
+			Sender: sender,
+		}
+		go aggregator.Start()
 		slog.Info("enabling email notifications (internal smtp)")
-		return webmention.WithNotifier(mailer)
+		return webmention.WithNotifier(listener.Mailer{aggregator})
 	default:
 		slog.Error("invalid option for NOTIFY_BY_MAIL", "value", notifyByMail)
 		os.Exit(ExitConfigError)

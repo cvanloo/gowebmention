@@ -12,6 +12,7 @@ import (
 	"strings"
 	"strconv"
 	"slices"
+	"time"
 	mimelib "mime"
 )
 
@@ -26,6 +27,12 @@ type (
 		targetAccepts TargetAcceptsFunc
 		mediaHandler  mediaRegister
 		userAgent     string
+		mentionCache  map[mentionCacheEntry]time.Time
+		cacheTimeout  time.Duration
+	}
+
+	mentionCacheEntry struct {
+		source, target string
 	}
 
 	mediaRegister []mediaHandler
@@ -116,6 +123,8 @@ func NewReceiver(opts ...ReceiverOption) *Receiver {
 			return false
 		},
 		userAgent:  "Webmention (github.com/cvanloo/gowebmention)",
+		mentionCache: map[mentionCacheEntry]time.Time{},
+		cacheTimeout: 3*time.Hour,
 	}
 	receiver.mediaHandler = mediaRegister{
 		{name: "text/html", qweight: 1.0, handler: receiver.HtmlHandler},
@@ -133,6 +142,14 @@ func NewReceiver(opts ...ReceiverOption) *Receiver {
 func WithFetchUserAgent(agent string) ReceiverOption {
 	return func(r *Receiver) {
 		r.userAgent = agent
+	}
+}
+
+// WithCacheTimeout configures the time period which must pass between receiving updates on a mention.
+// If a mention is sent again within this period, it is answered with http.StatusTooManyRequests.
+func WithCacheTimeout(d time.Duration) ReceiverOption {
+	return func(r *Receiver) {
+		r.cacheTimeout = d
 	}
 }
 
@@ -244,6 +261,14 @@ func (receiver *Receiver) handle(w http.ResponseWriter, r *http.Request) error {
 
 	if !receiver.targetAccepts(sourceURL, targetURL) {
 		return BadRequest("target does not accept webmentions from this source")
+	}
+
+	if t, ok := receiver.mentionCache[mentionCacheEntry{source: sourceURL.String(), target: targetURL.String()}]; ok {
+		if time.Now().Sub(t) < receiver.cacheTimeout {
+			return TooManyRequests()
+		}
+	} else {
+		receiver.mentionCache[mentionCacheEntry{source: sourceURL.String(), target: targetURL.String()}] = time.Now()
 	}
 
 	select {
