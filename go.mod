@@ -1,8 +1,9 @@
 module github.com/cvanloo/gowebmention
 
-go 1.23.3
+go 1.23.4
 
 require (
+	github.com/cvanloo/parsenv v1.0.0
 	github.com/emersion/go-msgauth v0.6.8
 	github.com/joho/godotenv v1.5.1
 	github.com/tomnomnom/linkheader v0.0.0-20180905144013-02ca5825eb80
