@@ -56,6 +56,7 @@ import (
 	"gopkg.in/gomail.v2"
 	"github.com/joho/godotenv"
 	"github.com/emersion/go-msgauth/dkim"
+	"github.com/cvanloo/parsenv"
 
 	webmention "github.com/cvanloo/gowebmention"
 	"github.com/cvanloo/gowebmention/listener"
@@ -65,67 +66,61 @@ func init() {
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, nil)))
 }
 
+var Config struct {
+	ShutdownTimeout int    `cfg:"default=20"`
+	EndpointUrl     string `cfg:"default=/api/webmention"`
+	ListenAddr      string `cfg:"default=:8080"`
+	AcceptDomain    string `cfg:"required"`
+	NotifyByEmail   string `cfg:"default=no"`
+}
+
+var ConfigMailExternal struct {
+	MailHost string
+	MailPort int
+	MailUser string
+	MailPass string
+	MailFrom string
+	MailTo   string
+}
+
+var ConfigMailInternal struct {
+	MailFrom         string `cfg:"required"`
+	MailTo           string `cfg:"required"`
+	MailFromAddr     string `cfg:"required"`
+	MailToAddr       string `cfg:"required"`
+	MailDkimPriv     string
+}
+
+var ConfigMailDkim struct {
+	MailDkimSelector string `cfg:"default=default"`
+	MailDkimHost     string `cfg:"required"`
+}
+
 const (
 	ExitSuccess = 0
 	ExitFailure = 1
 	ExitConfigError = -1
 )
 
-const (
-	defaultShutdownTimeout = 20 * time.Second
-	defaultEndpoint = "/api/webmention"
-	defaultListenAddr = ":8080"
-	defaultNotifyByMail = "no"
-)
-
-var (
-	shutdownTimeout = defaultShutdownTimeout
-	endpoint = defaultEndpoint
-	listenAddr = defaultListenAddr
-	acceptForDomain *url.URL
-	notifyByMail = defaultNotifyByMail
-)
-
-func loadConfig() {
-	if err := godotenv.Load(); err != nil {
-		_ = godotenv.Load("/etc/webmention/mentioner.env") // ignore error, use defaults
+func loadConfig() err {
+	if err := parsenv.Load(&Config); err != nil {
+		return err
 	}
-
-	if acceptForDomainStr := os.Getenv("ACCEPT_DOMAIN"); acceptForDomainStr != "" {
-		var err error
-		acceptForDomain, err = url.Parse(acceptForDomainStr)
-		if err != nil {
-			slog.Error(err.Error())
-			// @todo: never exit on config failure
-			os.Exit(ExitConfigError)
+	if Config.NotifyByEmail == "external" {
+		if err := parsenv.Load(&ConfigMailExternal); err != nil {
+			return err
 		}
-	} else {
-			slog.Error("missing config value ACCEPT_DOMAIN")
-			// @todo: never exit on config failure
-			os.Exit(ExitConfigError)
-	}
-
-	shutdownTimeout = defaultShutdownTimeout
-	if timeoutStr := os.Getenv("SHUTDOWN_TIMEOUT"); timeoutStr != "" {
-		if timeout, err := strconv.Atoi(timeoutStr); err == nil {
-			shutdownTimeout = time.Duration(timeout) * time.Second
+	} else if Config.NotifyByEmail == "internal" {
+		if err := parsenv.Load(&ConfigMailInternal); err != nil {
+			return err
+		}
+		if ConfigMailInternal.MailDkimPriv != "" {
+			if err := parsenv.Load(&ConfigMailDkim); err != nil {
+				return err
+			}
 		}
 	}
-
-	endpoint = defaultEndpoint
-	if endpointStr := os.Getenv("ENDPOINT"); endpointStr != "" {
-		endpoint = endpointStr
-	}
-
-	listenAddr = defaultListenAddr
-	if listenAddrStr := os.Getenv("LISTEN_ADDR"); listenAddrStr != "" {
-		listenAddr = listenAddrStr
-	}
-
-	notifyByMail = defaultNotifyByMail
-	if notifyByMailStr := os.Getenv("NOTIFY_BY_MAIL"); notifyByMailStr != "" {
-		notifyByMail = notifyByMailStr
-	}
+	return nil
 }
 
 func main() {
@@ -137,7 +132,18 @@ func main() {
 
 appLoop:
 	for {
-		loadConfig()
+		if err := loadConfig(); err != nil {
+			log.Printf("erroneous configuration, *** all services stopped ***: ", err)
+			select {
+			case <-reload:
+				slog.Info("sighup received, reloading configuration")
+				continue appLoop
+			case <-exit:
+				slog.Info("interrupt received, shutting down")
+				os.Exit(ExitConfigError)
+				return
+			}
+		}
 
 		receiver := webmention.NewReceiver(
 			webmention.WithAcceptsFunc(func(source, target *url.URL) bool {
@@ -151,7 +157,7 @@ appLoop:
 					"status", mention.Status,
 				)
 			})),
-			configureOrNil(notifyByMail != "no", configureMailer),
+			configureOrNil(Config.NotifyByEmail != "no", configureMailer),
 		)
 
 		go receiver.ProcessMentions()
@@ -214,8 +220,9 @@ func configureOrNil(shouldConfigure bool, option func() webmention.ReceiverOptio
 	return nil
 }
 
+// @todo: this must happen in loadConfig()
 func configureMailer() webmention.ReceiverOption {
-	switch notifyByMail {
+	switch Config.NotifyByEmail {
 	case "external":
 		host := os.Getenv("MAIL_HOST")
 		if host == "" {

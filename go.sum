@@ -1,3 +1,5 @@
+github.com/cvanloo/parsenv v1.0.0 h1:lB4UmyrSisfBPsT8ktXTILbxNPEwP9y9pGV/+2uxRSk=
+github.com/cvanloo/parsenv v1.0.0/go.mod h1:9/d7SVzkSuLfl90vh1TVO87NKZF8uH55rvR25kAzBA4=
 github.com/emersion/go-msgauth v0.6.8 h1:kW/0E9E8Zx5CdKsERC/WnAvnXvX7q9wTHia1OA4944A=
 github.com/emersion/go-msgauth v0.6.8/go.mod h1:YDwuyTCUHu9xxmAeVj0eW4INnwB6NNZoPdLerpSxRrc=
 github.com/joho/godotenv v1.5.1 h1:7eLL/+HRGLY0ldzfGMeQkb7vMd0as4CfYvUVzLqw0N0=
