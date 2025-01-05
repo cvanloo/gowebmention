@@ -5,39 +5,41 @@
 // This application can be run (for example) as a daemon.
 // A systemd service configuration is provided together with the source code.
 //
-// Configuration is read from a .env file (or just the env vars directly).
+// Configuration is read from a .env file (or just the OS env vars directly).
 // An .env file must be present in either the process working directory
-// `$PWD/.env`, or in `/etc/webmention/mentioner.env`.
+// `$PWD/.env`, or in `/etc/webmention/mentionee.env`.
 // 
 // Configurable values are:
-//   - SHUTDOWN_TIMEOUT=Seconds: How long to wait for a clean shutdown after SIGINT or SIGTERM (default 20)
+//   - SHUTDOWN_TIMEOUT=Seconds: How long to wait for a clean shutdown after SIGINT or SIGTERM (default 120)
 //   - ENDPOINT=URL Path: On which path to listen for Webmentions (default /api/webmention)
 //   - LISTEN_ADDR=Domain with Port: Bind listener to this domain:port (default :8080)
 //   - ACCEPT_DOMAIN=Domain: Accept mentions if they point to this domain (e.g., the domain of your blog, required, no default)
 //   - NOTIFY_BY_MAIL=external, internal or no: Whether or not to enable notifications by mail (default no)
-//                    extarnl: use an external smtp server
-//                    internal: use builtin smtp
-// Required options for external smtp server:
-//   - MAIL_HOST=Domain: Domain of the outgoing mail server (no default, required by NOTIFY_BY_MAIL)
-//   - MAIL_PORT=Port: Port of the outgoing mail server (no default, required by NOTIFY_BY_MAIL)
-//   - MAIL_USER=Username: User to authenticate to the outgoing mail server (no default, required by NOTIFY_BY_MAIL)
-//   - MAIL_PASS=Password: Password to authenticate to the outgoing mail server (no default, required by NOTIFY_BY_MAIL)
+//                    external: use an external (relay) SMTP server
+//                    internal: use builtin SMTP (deliver mail directly to the recipient)
+// Options for external SMTP server:
+//   - MAIL_HOST=Domain: Domain of the outgoing mail server (no default, required)
+//   - MAIL_PORT=Port: Port of the outgoing mail server (no default, required)
+//   - MAIL_USER=Username: User to authenticate to the outgoing mail server (no default, required)
+//   - MAIL_PASS=Password: Password to authenticate to the outgoing mail server (no default, required)
 //   - MAIL_FROM=E-Mail address: Address used in the FROM header (default same as MAIL_USER)
-//   - MAIL_TO=E-Mail address: Address used in the TO header (default same as MAIL_FROM or MAIL_USER)
-// Required options for internal smpt server:
-//   - MAIL_FROM=Send emails from this email address
-//   - MAIL_TO=Send emails to this email address
-//   - MAIL_FROM_ADDR=Domain from which to send mails
-//   - MAIL_TO_ADDR=Domain of the receiving mail server
-//   - MAIL_DKIM_PRIV=Path to private key: Path to private key used for dkim signing (default don't sign)
+//   - MAIL_TO=E-Mail address: Address used in the TO header (default same as MAIL_FROM, or MAIL_USER if MAIL_FROM not set)
+// Options for internal SMPT server:
+//   - MAIL_FROM=E-Mail address: Send emails from this address (required)
+//   - MAIL_TO=E-Mail address: Send emails to this email address (required)
+//   - MAIL_FROM_ADDR=Domain: Domain from which to send mails (required)
+//   - MAIL_TO_ADDR=Domain: Domain of the receiving mail server (required)
+//   - MAIL_DKIM_PRIV=Path to private key: Path to private key used for dkim signing (default empty, don't sign)
 //   - MAIL_DKIM_SELECTOR=Selector: DKIM selector (default is "default")
-//   - MAIL_DKIM_HOST=Domain on which the DKIM is configured
+//   - MAIL_DKIM_HOST=Domain: Domain on which DKIM is configured
+//
+// For more information on how to setup the internal mail server, check the
+// documentation on ConfigMailInternal.
 //
 // Configuration is reloaded on SIGHUP.
 package main
 
 import (
-	"strings"
 	"context"
 	"errors"
 	"fmt"
@@ -48,7 +50,6 @@ import (
 	"os/signal"
 	"syscall"
 	"time"
-	"strconv"
 	"crypto/x509"
 	"crypto/rsa"
 	"encoding/pem"
@@ -67,7 +68,7 @@ func init() {
 }
 
 var Config struct {
-	ShutdownTimeout int    `cfg:"default=20"`
+	ShutdownTimeout int    `cfg:"default=120"`
 	EndpointUrl     string `cfg:"default=/api/webmention"`
 	ListenAddr      string `cfg:"default=:8080"`
 	AcceptDomain    string `cfg:"required"`
@@ -75,14 +76,27 @@ var Config struct {
 }
 
 var ConfigMailExternal struct {
-	MailHost string
-	MailPort int
-	MailUser string
-	MailPass string
+	MailHost string `cfg:"required"`
+	MailPort int    `cfg:"required"`
+	MailUser string `cfg:"required"`
+	MailPass string `cfg:"required"`
 	MailFrom string
 	MailTo   string
 }
 
+// Mentionee can deliver emails directly to your inbox.
+// For this, it needs to be authorized to send emails from the MAIL_FROM_ADDR
+// domain. The following DNS entries are required:
+//
+// 	- A   | mail.example.com   | 11.22.33.44
+// 	- MX  | example.com        | mail.example.com
+// 	- TXT | example.com        | v=spf1 mx -all
+// 	- TXT | _dmarc.example.com | v=DMARC1; p=quarantine;
+//
+// Replace example.com with your own domain, and 11.22.33.44 with the IP of the
+// server on which mentionee runs.
+//
+// For DKIM refer to the documentation on ConfigMailDkim.
 var ConfigMailInternal struct {
 	MailFrom         string `cfg:"required"`
 	MailTo           string `cfg:"required"`
@@ -91,6 +105,32 @@ var ConfigMailInternal struct {
 	MailDkimPriv     string
 }
 
+// In addition to the DNS entries explained in ConfigMailInternal, you'll have
+// to setup another DNS entry for DKIM verification to work.
+//
+// 	- TXT | default._domainkey.example.com | v=DKIM1; k=rsa; p=YOUR_PUBLIC_KEY_HERE
+//
+// "default" must be the same as in MAIL_DKIM_SELECTOR.
+// You can create a pub/priv key pair using the commands:
+//
+// 	openssl genrsa -out private 1024
+// 	openssl rsa -in private -pubout -out public
+// 	sed '1d;$d' public | tr -d '\n' > spublic; echo "" >> spublic
+//
+// MAIL_DKIM_PRIV must point to the 'private' file.
+// As YOUR_PUBLIC_KEY_HERE in the above DNS entry, you must use the contents
+// from the 'spublic' file.
+//
+// MAIL_DKIM_HOST is your domain, e.g., example.com.
+//
+// Since mentionee can only send, not receive emails, you might want to setup
+// 'rua' and 'ruf' to point to a different email address:
+//
+// 	- TXT | _dmarc.example.com | v=DMARC1; p=quarantine; rua=mailto:dmarc@whatever.else; ruf=mailto:dmarc-forensics@whatever.else;
+//
+// For this to work, you also need an entry on the whatever.else domain:
+//
+// 	- TXT | example.com._report._dmarc | v=DMARC1
 var ConfigMailDkim struct {
 	MailDkimSelector string `cfg:"default=default"`
 	MailDkimHost     string `cfg:"required"`
@@ -102,25 +142,123 @@ const (
 	ExitConfigError = -1
 )
 
-func loadConfig() err {
-	if err := parsenv.Load(&Config); err != nil {
-		return err
+func loadConfig() (opts []webmention.ReceiverOption, listenAddr, endpoint string, shutdownTimeout time.Duration, agg *listener.ReportAggregator, err error) {
+	if err := godotenv.Load(); err != nil {
+		godotenv.Load("/etc/webmention/mentionee.env")
 	}
+	if err := parsenv.Load(&Config); err != nil {
+		return opts, listenAddr, endpoint, shutdownTimeout, agg, err
+	}
+	listenAddr = Config.ListenAddr
+	endpoint = Config.EndpointUrl
+	shutdownTimeout = time.Duration(Config.ShutdownTimeout) * time.Second
+	acceptDomain, err := url.Parse(Config.AcceptDomain)
+	if err != nil {
+		return opts, listenAddr, endpoint, shutdownTimeout, agg, err
+	}
+	opts = append(opts, webmention.WithAcceptsFunc(func(source, target *url.URL) bool {
+		return target.Scheme == acceptDomain.Scheme && target.Host == acceptDomain.Host
+	}))
 	if Config.NotifyByEmail == "external" {
 		if err := parsenv.Load(&ConfigMailExternal); err != nil {
-			return err
+			return opts, listenAddr, endpoint, shutdownTimeout, agg, err
 		}
+		dialer := gomail.NewDialer(ConfigMailExternal.MailHost, ConfigMailExternal.MailPort, ConfigMailExternal.MailUser, ConfigMailExternal.MailPass)
+		from := ConfigMailExternal.MailUser
+		if ConfigMailExternal.MailFrom != "" {
+			from = ConfigMailExternal.MailFrom
+		}
+		to := from
+		if ConfigMailExternal.MailTo != "" {
+			to = ConfigMailExternal.MailTo
+		}
+		mailer := listener.ExternalMailer{
+			SubjectLine: listener.DefaultSubjectLine,
+			Body: listener.DefaultBody,
+			From: from,
+			To: to,
+			Dialer: dialer,
+		}
+		aggregator := &listener.ReportAggregator{
+			SendAfterTime: 12*time.Hour,
+			SendAfterCount: -1,
+			Sender: mailer,
+		}
+		opts = append(opts, webmention.WithNotifier(listener.Mailer{aggregator}))
+		agg = aggregator
 	} else if Config.NotifyByEmail == "internal" {
 		if err := parsenv.Load(&ConfigMailInternal); err != nil {
-			return err
+			return opts, listenAddr, endpoint, shutdownTimeout, agg, err
 		}
 		if ConfigMailInternal.MailDkimPriv != "" {
 			if err := parsenv.Load(&ConfigMailDkim); err != nil {
-				return err
+				return opts, listenAddr, endpoint, shutdownTimeout, agg, err
 			}
+			pkbs, err := os.ReadFile(ConfigMailInternal.MailDkimPriv)
+			if err != nil {
+				return opts, listenAddr, endpoint, shutdownTimeout, agg, err
+			}
+			block, _ := pem.Decode(pkbs)
+			if block == nil {
+				return opts, listenAddr, endpoint, shutdownTimeout, agg, errors.New("failed to decode PEM block containing private key")
+			}
+			key, err := x509.ParsePKCS8PrivateKey(block.Bytes)
+			if err != nil {
+				return opts, listenAddr, endpoint, shutdownTimeout, agg, err
+			}
+			pk, ok := key.(*rsa.PrivateKey)
+			if !ok {
+				return opts, listenAddr, endpoint, shutdownTimeout, agg, fmt.Errorf("not an RSA private key: %T", key)
+			}
+			mailer := listener.InternalDKIMMailer{
+				InternalMailer: listener.InternalMailer{
+					SubjectLine: listener.DefaultSubjectLine,
+					Body: listener.DefaultBody,
+					FromAddr: ConfigMailInternal.MailFromAddr,
+					ToAddr: ConfigMailInternal.MailToAddr,
+					From: ConfigMailInternal.MailFrom,
+					To: ConfigMailInternal.MailTo,
+				},
+				DkimSignOpts: &dkim.SignOptions{
+					Domain: ConfigMailDkim.MailDkimHost,
+					Selector: ConfigMailDkim.MailDkimSelector,
+					Signer: pk,
+				},
+			}
+			aggregator := &listener.ReportAggregator{
+				SendAfterTime: 12*time.Hour,
+				SendAfterCount: -1,
+				Sender: mailer,
+			}
+			opts = append(opts, webmention.WithNotifier(listener.Mailer{aggregator}))
+			agg = aggregator
+		} else {
+			mailer := listener.InternalMailer{
+				SubjectLine: listener.DefaultSubjectLine,
+				Body: listener.DefaultBody,
+				FromAddr: ConfigMailInternal.MailFromAddr,
+				ToAddr: ConfigMailInternal.MailToAddr,
+				From: ConfigMailInternal.MailFrom,
+				To: ConfigMailInternal.MailTo,
+			}
+			aggregator := &listener.ReportAggregator{
+				SendAfterTime: 12*time.Hour,
+				SendAfterCount: -1,
+				Sender: mailer,
+			}
+			opts = append(opts, webmention.WithNotifier(listener.Mailer{aggregator}))
+			agg = aggregator
 		}
 	}
-	return nil
+	return opts, listenAddr, endpoint, shutdownTimeout, agg, nil
+}
+
+type OptionsCollection []webmention.ReceiverOption
+
+func (c OptionsCollection) Configuration(r *webmention.Receiver) {
+	for _, f := range c {
+		f(r)
+	}
 }
 
 func main() {
@@ -128,12 +266,14 @@ func main() {
 	signal.Notify(reload, syscall.SIGHUP) // kill -HUP $(pidof mentionee)
 
 	exit := make(chan os.Signal, 1)
-	signal.Notify(exit, syscall.SIGINT, syscall.SIGTERM/*, syscall.SIGQUIT*/) // kill -TERM $(pidof mentionee)
+	signal.Notify(exit, syscall.SIGINT, syscall.SIGTERM) // kill -TERM $(pidof mentionee)
 
 appLoop:
 	for {
-		if err := loadConfig(); err != nil {
-			log.Printf("erroneous configuration, *** all services stopped ***: ", err)
+		options, listenAddr, endpoint, shutdownTimeout, aggregator, err := loadConfig()
+		if err != nil {
+			slog.Error("erroneous configuration, *** all services stopped ***: ", "configError", err)
+			slog.Error("...waiting for SIGHUP (reload config) or SIGTERM/INT (terminate)")
 			select {
 			case <-reload:
 				slog.Info("sighup received, reloading configuration")
@@ -146,10 +286,6 @@ appLoop:
 		}
 
 		receiver := webmention.NewReceiver(
-			webmention.WithAcceptsFunc(func(source, target *url.URL) bool {
-				// @todo: as default value use same as listen addr
-				return target.Scheme == acceptForDomain.Scheme && target.Host == acceptForDomain.Host
-			}),
 			webmention.WithNotifier(webmention.NotifierFunc(func(mention webmention.Mention) {
 				slog.Info("received webmention",
 					"source", mention.Source.String(),
@@ -157,9 +293,10 @@ appLoop:
 					"status", mention.Status,
 				)
 			})),
-			configureOrNil(Config.NotifyByEmail != "no", configureMailer),
+			OptionsCollection(options).Configuration,
 		)
 
+		go aggregator.Start()
 		go receiver.ProcessMentions()
 
 		mux := &http.ServeMux{}
@@ -172,7 +309,6 @@ appLoop:
 
 		go func() {
 			err := server.ListenAndServe()
-			//err := server.ListenAndServeTLS()
 			if err != nil && !errors.Is(err, http.ErrServerClosed) {
 				slog.Error(fmt.Sprintf("http server error: %s", err))
 				os.Exit(ExitFailure)
@@ -187,6 +323,7 @@ appLoop:
 				slog.Error(fmt.Sprintf("http shutdown error: %s", err))
 			}
 			receiver.Shutdown(shutdownCtx)
+			aggregator.SendNow()
 		}
 
 		select {
@@ -201,169 +338,4 @@ appLoop:
 			return
 		}
 	}
-}
-
-func wordToBool(word string) bool {
-	meansYes := []string{"true", "yes", "y"}
-	for _, yes := range meansYes {
-		if strings.ToLower(word) == yes {
-			return true
-		}
-	}
-	return false
-}
-
-func configureOrNil(shouldConfigure bool, option func() webmention.ReceiverOption) webmention.ReceiverOption {
-	if shouldConfigure {
-		return option()
-	}
-	return nil
-}
-
-// @todo: this must happen in loadConfig()
-func configureMailer() webmention.ReceiverOption {
-	switch Config.NotifyByEmail {
-	case "external":
-		host := os.Getenv("MAIL_HOST")
-		if host == "" {
-			slog.Error("missing mail host")
-			os.Exit(ExitConfigError)
-			return nil
-		}
-		user := os.Getenv("MAIL_USER")
-		if user == "" {
-			slog.Error("missing mail user")
-			os.Exit(ExitConfigError)
-			return nil
-		}
-		sendMailsFrom := os.Getenv("MAIL_FROM")
-		if sendMailsFrom == "" {
-			sendMailsFrom = user
-		}
-		sendMailsTo := os.Getenv("MAIL_TO")
-		if sendMailsTo == "" {
-			sendMailsTo = sendMailsFrom
-		}
-		portStr := os.Getenv("MAIL_PORT")
-		port, err := strconv.Atoi(portStr)
-		if err != nil {
-			slog.Error("invalid or missing mail port", "port", portStr)
-			os.Exit(ExitConfigError)
-			return nil
-		}
-		pass := os.Getenv("MAIL_PASS")
-		if pass == "" {
-			slog.Error("missing mail pass")
-			os.Exit(ExitConfigError)
-			return nil
-		}
-		dialer := gomail.NewDialer(host, port, user, pass)
-		mailer := listener.ExternalMailer{
-			SubjectLine: listener.DefaultSubjectLine,
-			Body: listener.DefaultBody,
-			From: sendMailsFrom,
-			To: sendMailsTo,
-			Dialer: dialer,
-		}
-		aggregator := &listener.ReportAggregator{
-			SendAfterTime: 12*time.Hour,
-			SendAfterCount: 24,
-			Sender: mailer,
-		}
-		go aggregator.Start()
-		slog.Info("enabling email notifications (external smtp)")
-		return webmention.WithNotifier(listener.Mailer{aggregator})
-	case "internal":
-		toAddr := os.Getenv("MAIL_TO_ADDR")
-		if toAddr == "" {
-			slog.Error("missing MAIL_TO_ADDR")
-			os.Exit(ExitConfigError)
-			return nil
-		}
-		to := os.Getenv("MAIL_TO")
-		if to == "" {
-			slog.Error("missing MAIL_TO")
-			os.Exit(ExitConfigError)
-			return nil
-		}
-		fromAddr := os.Getenv("MAIL_FROM_ADDR")
-		if fromAddr == "" {
-			slog.Error("missing MAIL_FROM_ADDR")
-			os.Exit(ExitConfigError)
-			return nil
-		}
-		from := os.Getenv("MAIL_FROM")
-		if from == "" {
-			slog.Error("missing MAIL_FROM")
-			os.Exit(ExitConfigError)
-			return nil
-		}
-		host := os.Getenv("MAIL_DKIM_HOST")
-		if host == "" {
-			slog.Error("missing MAIL_DKIM_HOST")
-			os.Exit(ExitConfigError)
-			return nil
-		}
-		internalMailer := listener.InternalMailer{
-			SubjectLine: listener.DefaultSubjectLine,
-			Body: listener.DefaultBody,
-			FromAddr: fromAddr,
-			ToAddr: toAddr,
-			From: from,
-			To: to,
-		}
-		var sender listener.Sender
-		sender = internalMailer
-		dkimPrivPath := os.Getenv("MAIL_DKIM_PRIV")
-		if dkimPrivPath != "" {
-			pkbs, err := os.ReadFile(dkimPrivPath)
-			if err != nil {
-				slog.Error(err.Error())
-				os.Exit(ExitConfigError)
-			}
-			block, _ := pem.Decode(pkbs)
-			if block == nil {
-				slog.Error("failed to decode PEM block containing private key")
-				os.Exit(ExitConfigError)
-				return nil
-			}
-			key, err := x509.ParsePKCS8PrivateKey(block.Bytes)
-			if err != nil {
-				slog.Error(err.Error())
-				os.Exit(ExitConfigError)
-				return nil
-			}
-			pk, ok := key.(*rsa.PrivateKey)
-			if !ok {
-				slog.Error("not an rsa private key")
-				os.Exit(ExitConfigError)
-				return nil
-			}
-			selector := os.Getenv("MAIL_DKIM_SELECTOR")
-			if selector == "" {
-				selector = "default"
-			}
-			dkimSignOpts := &dkim.SignOptions{
-				Domain: host,
-				Selector: selector,
-				Signer: pk,
-			}
-			sender = listener.InternalDKIMMailer{
-				InternalMailer: internalMailer,
-				DkimSignOpts: dkimSignOpts,
-			}
-		}
-		aggregator := &listener.ReportAggregator{
-			SendAfterTime: 12*time.Hour,
-			SendAfterCount: 24,
-			Sender: sender,
-		}
-		go aggregator.Start()
-		slog.Info("enabling email notifications (internal smtp)")
-		return webmention.WithNotifier(listener.Mailer{aggregator})
-	default:
-		slog.Error("invalid option for NOTIFY_BY_MAIL", "value", notifyByMail)
-		os.Exit(ExitConfigError)
-	}
-	return nil
 }
