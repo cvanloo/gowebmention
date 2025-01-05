@@ -1,4 +1,4 @@
-FROM golang:1.23.3-alpine3.20 AS build
+FROM golang:1.23.4-alpine3.20 AS build
 WORKDIR /usr/src/mentionee
 COPY go.mod go.sum ./
 RUN go mod download && go mod verify
