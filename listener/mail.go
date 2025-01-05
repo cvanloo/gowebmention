@@ -86,7 +86,7 @@ func (m *ReportAggregator) Send(mentions []webmention.Mention) error {
 	switch {
 	case time.Now().Sub(m.lastSentTime) >= m.SendAfterTime:
 		fallthrough
-	case len(m.Todos) >= m.SendAfterCount:
+	case m.SendAfterCount > 0 && len(m.Todos) >= m.SendAfterCount:
 		return m.SendNow()
 	}
 	return nil
