@@ -72,7 +72,7 @@ var Config struct {
 	EndpointUrl     string `cfg:"default=/api/webmention"`
 	ListenAddr      string `cfg:"default=:8080"`
 	AcceptDomain    string `cfg:"required"`
-	NotifyByEmail   string `cfg:"default=no"`
+	NotifyByMail    string `cfg:"default=no"`
 }
 
 var ConfigMailExternal struct {
@@ -159,7 +159,7 @@ func loadConfig() (opts []webmention.ReceiverOption, listenAddr, endpoint string
 	opts = append(opts, webmention.WithAcceptsFunc(func(source, target *url.URL) bool {
 		return target.Scheme == acceptDomain.Scheme && target.Host == acceptDomain.Host
 	}))
-	if Config.NotifyByEmail == "external" {
+	if Config.NotifyByMail == "external" {
 		if err := parsenv.Load(&ConfigMailExternal); err != nil {
 			return opts, listenAddr, endpoint, shutdownTimeout, agg, err
 		}
@@ -186,7 +186,7 @@ func loadConfig() (opts []webmention.ReceiverOption, listenAddr, endpoint string
 		}
 		opts = append(opts, webmention.WithNotifier(listener.Mailer{aggregator}))
 		agg = aggregator
-	} else if Config.NotifyByEmail == "internal" {
+	} else if Config.NotifyByMail == "internal" {
 		if err := parsenv.Load(&ConfigMailInternal); err != nil {
 			return opts, listenAddr, endpoint, shutdownTimeout, agg, err
 		}
