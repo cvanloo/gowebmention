@@ -15,7 +15,8 @@ import webmention "github.com/cvanloo/gowebmention"
 ## Send webmentions
 
 ```sh
-mentioner <source> <target> [<targets>...]
+go build cmd/mentioner/main.go -o mentioner
+./mentioner <source> <target> [<targets>...]
 ```
 
 ## Use as a library
