@@ -296,7 +296,9 @@ appLoop:
 			OptionsCollection(options).Configuration,
 		)
 
-		go aggregator.Start()
+		if aggregator != nil {
+			go aggregator.Start()
+		}
 		go receiver.ProcessMentions()
 
 		mux := &http.ServeMux{}
@@ -323,7 +325,9 @@ appLoop:
 				slog.Error(fmt.Sprintf("http shutdown error: %s", err))
 			}
 			receiver.Shutdown(shutdownCtx)
-			aggregator.SendNow()
+			if aggregator != nil {
+				aggregator.SendNow()
+			}
 		}
 
 		select {
