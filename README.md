@@ -56,7 +56,7 @@ receiver := webmention.NewReceiver(
 // webmentions that pass validation are passed on to the listeners
 go receiver.ProcessMentions()
 
-http.HandleFunc("/api/webmention", receiver.WebmentionEndpoint) // register webmention endpoint
+http.Handle("/api/webmention", receiver) // register webmention endpoint
 http.ListenAndServe(":8080", nil)
 ```
 
