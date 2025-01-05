@@ -12,6 +12,12 @@ Import it:
 import webmention "github.com/cvanloo/gowebmention"
 ```
 
+## Send webmentions
+
+```sh
+mentioner <source> <target> [<targets>...]
+```
+
 ## Use as a library
 
 Sending webmentions can be done through a `WebMentionSender`.
