@@ -170,7 +170,7 @@ func TestMentioningRocks(t *testing.T) {
 
 	sender := webmention.NewSender()
 
-	source := must(url.Parse("http://blog.vanloo.ch/test/webmention.html"))
+	source := must(url.Parse("https://wmt.karasukei.lgbt/"))
 	for _, target := range targets {
 		err := sender.Mention(source, must(url.Parse(target.Url)))
 		if err != nil {
