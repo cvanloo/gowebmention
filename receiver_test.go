@@ -1,23 +1,23 @@
 package webmention_test
 
 import (
+	"context"
 	"errors"
-	"strconv"
-	"io"
 	"fmt"
-	"net/url"
-	"testing"
+	webmention "github.com/cvanloo/gowebmention"
+	"io"
+	"log"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"strconv"
 	"sync"
-	"log"
-	"context"
+	"testing"
 	"time"
-	webmention "github.com/cvanloo/gowebmention"
 )
 
 func ExampleReceiver() {
-	acceptForTargetUrl  := must(url.Parse("https://example.com"))
+	acceptForTargetUrl := must(url.Parse("https://example.com"))
 	webmentionee := webmention.NewReceiver(
 		webmention.WithAcceptsFunc(func(source, target *url.URL) bool {
 			return acceptForTargetUrl.Scheme == target.Scheme && acceptForTargetUrl.Host == target.Host
@@ -29,7 +29,7 @@ func ExampleReceiver() {
 	mux := &http.ServeMux{}
 	mux.Handle("/api/webmention", webmentionee)
 	srv := http.Server{
-		Addr: ":8080",
+		Addr:    ":8080",
 		Handler: mux,
 	}
 
@@ -63,11 +63,11 @@ func accepts(source, target *url.URL) bool {
 }
 
 type TestCase struct {
-	Comment string
-	SourceHandler func(ts **httptest.Server) func(w http.ResponseWriter, r *http.Request)
-	ExpectedHttpStatus int
+	Comment               string
+	SourceHandler         func(ts **httptest.Server) func(w http.ResponseWriter, r *http.Request)
+	ExpectedHttpStatus    int
 	ExpectedMentionStatus webmention.Status
-	ExpectedError error
+	ExpectedError         error
 }
 
 var TestCases = []TestCase{
@@ -79,7 +79,7 @@ var TestCases = []TestCase{
 				w.Write([]byte(body))
 			}
 		},
-		ExpectedHttpStatus: 202,
+		ExpectedHttpStatus:    202,
 		ExpectedMentionStatus: webmention.StatusLink,
 	},
 	{
@@ -89,7 +89,7 @@ var TestCases = []TestCase{
 				w.Write([]byte("<p>I'm not linking to anything. ;-(</p>"))
 			}
 		},
-		ExpectedHttpStatus: 202, // this type of validation happens async
+		ExpectedHttpStatus:    202, // this type of validation happens async
 		ExpectedMentionStatus: webmention.StatusNoLink,
 	},
 	{
@@ -100,7 +100,7 @@ var TestCases = []TestCase{
 				w.Write([]byte(`<p>This post was deleted</p>`))
 			}
 		},
-		ExpectedHttpStatus: 202,
+		ExpectedHttpStatus:    202,
 		ExpectedMentionStatus: webmention.StatusDeleted,
 	},
 	{

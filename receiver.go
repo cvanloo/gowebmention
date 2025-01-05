@@ -1,18 +1,18 @@
 package webmention
 
 import (
-	"fmt"
 	"context"
+	"fmt"
 	"golang.org/x/net/html"
 	"io"
 	"log/slog"
+	mimelib "mime"
 	"net/http"
 	"net/url"
-	"strings"
-	"strconv"
 	"slices"
+	"strconv"
+	"strings"
 	"time"
-	mimelib "mime"
 )
 
 type (
@@ -35,7 +35,7 @@ type (
 	}
 
 	mediaRegister []mediaHandler
-	mediaHandler struct {
+	mediaHandler  struct {
 		name    string
 		handler MediaHandler
 		qweight float64
@@ -46,13 +46,13 @@ type (
 	// If no (exact) match is found, a status of StatusNoLink and a nil error must be returned.
 	// If error is non-nil, it is treated as an internal error and the value of status is ignored.
 	// On error, no listeners will be invoked.
-	MediaHandler    func(sourceData io.Reader, target URL) (Status, error)
-	ReceiverOption  func(*Receiver)
-	Mention struct {
+	MediaHandler   func(sourceData io.Reader, target URL) (Status, error)
+	ReceiverOption func(*Receiver)
+	Mention        struct {
 		Source, Target URL
 		Status         Status
 	}
-	Status string
+	Status            string
 	TargetAcceptsFunc func(source, target URL) bool
 
 	// A registered Notifier is informed of any valid webmentions.
@@ -121,9 +121,9 @@ func NewReceiver(opts ...ReceiverOption) *Receiver {
 		targetAccepts: func(URL, URL) bool {
 			return false
 		},
-		userAgent:  "Webmention (github.com/cvanloo/gowebmention)",
+		userAgent:    "Webmention (github.com/cvanloo/gowebmention)",
 		mentionCache: map[mentionCacheEntry]time.Time{},
-		cacheTimeout: 3*time.Hour,
+		cacheTimeout: 3 * time.Hour,
 	}
 	receiver.mediaHandler = mediaRegister{
 		{name: "text/html", qweight: 1.0, handler: HtmlHandler},
@@ -182,7 +182,7 @@ func WithMediaHandler(mime string, qweight float64, handler MediaHandler) Receiv
 			}
 		} else {
 			r.mediaHandler = append(r.mediaHandler, mediaHandler{
-				name: mime,
+				name:    mime,
 				qweight: qweight,
 				handler: handler,
 			})

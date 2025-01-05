@@ -1,14 +1,14 @@
 package listener
 
 import (
+	"bytes"
 	"fmt"
 	"gopkg.in/gomail.v2"
 	"log/slog"
-	"bytes"
 	"net/smtp"
+	"strings"
 	"sync"
 	"time"
-	"strings"
 
 	"github.com/emersion/go-msgauth/dkim"
 
@@ -38,7 +38,7 @@ type (
 	}
 	InternalDKIMMailer struct {
 		InternalMailer
-		DkimSignOpts     *dkim.SignOptions
+		DkimSignOpts *dkim.SignOptions
 	}
 	ExternalMailer struct {
 		SubjectLine func([]webmention.Mention) string
